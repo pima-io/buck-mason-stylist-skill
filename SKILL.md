@@ -169,6 +169,8 @@ Before posting to `/v1/images/edits`, assemble these in this exact order:
 2. If the customer is logged in and wants to use a coupon or store credit before they hit Shopify, use `POST /api/update_cart` + `POST /api/add_coupon_or_customer_credit` (Pima-side cart) instead, then surface the resulting cart's checkout URL.
 3. **Do not call `POST /api/purchase` from the agent unless the customer explicitly says "charge my card on file"** *and* the request is in a session where the customer is authenticated and has a saved card (`order[use_existing_card]: true`). Even then, confirm the total in plain English first and require an unambiguous "yes, charge it" before submitting.
 
+4. **Fully agent-driven checkout (ACP path).** When the customer wants the agent to handle the entire transaction — line items, shipping, payment, confirmation — without bouncing to a browser, use the Stripe / OpenAI **Agentic Commerce Protocol** endpoints at `/mcp/buckmason/acp/v1/checkouts/*`. Required when the surface has no browser (voice agents, concierge flows, headless installations). Always read the total back, always require an explicit "yes/charge it" in the same turn, and pass `X-Customer-Confirmation: yes-charge-it` on the `/complete` call. The full lifecycle, guardrails (idempotency, total mismatch, expired checkout, card decline), and worked transcript are in **`references/acp.md`** — read it before invoking any ACP endpoint.
+
 ## Checkout safety
 
 A shopping agent has full read/write access to a checkout flow. Treat any tool call that moves money as a destructive action that needs explicit confirmation in the same turn:
@@ -214,5 +216,6 @@ When choosing or recommending items, weight by (in this order):
 - `references/seasons.md` — season + region + heat-type mapping for outfit logic.
 - `references/style-reasoning.md` — the *why* engine: climate matrix, formality scale, classic-vs-trend filter, rationale format.
 - `references/output-formats.md` — how to render the lookbook as `images` / `ppt` / `html`, plus quickest hosting options for the HTML format.
+- `references/acp.md` — Stripe/OpenAI Agentic Commerce Protocol endpoints for fully agent-driven checkout (line items + shipping + payment + confirmation), with guardrails and a worked transcript.
 - `templates/profile.example.md`, `wardrobe.example.md`, `events.example.md` — copy these into the customer's workspace and fill in.
 - `examples/stock-check.md`, `examples/lookbook.md` — concrete walkthroughs of the two main flows.
