@@ -57,7 +57,7 @@ ClawHub reviewers and curious users without any onboarding.
      "namespace": "pima",
      "version": "0.1.0",
      "visibility": "public",
-     "homepage": "https://github.com/buckmason/pima/tree/master/skills/buck-mason-stylist",
+     "homepage": "https://github.com/buckmason/buck-mason-stylist-skill",
      "primaryEnv": ["OPENAI_API_KEY"],
      "requires": {
        "binaries": ["magick", "jq", "curl", "python3", "wkhtmltopdf"],

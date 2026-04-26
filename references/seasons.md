@@ -19,6 +19,8 @@ For Southern Hemisphere requests, invert.
 
 Customer's event location modifies the season's defaults. Note the **heat type** column — that determines fabric choice (see climate matrix in `style-reasoning.md`).
 
+### US regions (primary)
+
 | Region | Heat type | Adjustment |
 |---|---|---|
 | Pacific Northwest (Seattle, Portland) | coastal mild → cold wet | Always rain-resistant outer; year-round layering |
@@ -31,12 +33,20 @@ Customer's event location modifies the season's defaults. Note the **heat type**
 | Texas (Austin, Dallas, Houston) | humid heat (Houston) / dry heat (W. Texas) | Summer extreme; mild winter; spring/fall short |
 | Florida (Miami, Tampa) | humid heat | Summer-like 8 months; rare cold snaps; avoid heavy cotton |
 | Midwest (Chicago, Minneapolis) | humid heat (summer) → cold dry (winter) | Winters severe; humid summers |
+
+If the customer specifies altitude (mountain wedding, ski trip, etc.) bias toward layering and warmer weights regardless of season. UV at altitude is intense even when ambient is cold — long sleeves are a feature, not a punishment.
+
+<details>
+<summary>International regions (expansion — apply when the event is outside the US)</summary>
+
+| Region | Heat type | Adjustment |
+|---|---|---|
 | Mediterranean coast (Côte d'Azur, Amalfi, Mykonos) | dry heat midday → humid evenings | Linen by day; add a fine-knit layer for sea-breeze evenings |
 | Southeast Asia / Tropical (Singapore, Bali, Caribbean) | humid heat (extreme) | Linen, tencel, breathable knits ONLY; no synthetics |
 | Northern Europe summer (London, Paris, Amsterdam) | coastal mild | Calendar-true but can swing 60°F→85°F same day; layering essential |
 | Japan summer (Tokyo, Kyoto) | humid heat (extreme) | Linen and breathable cotton-linen; mid tones (sweat shows on white) |
 
-If the customer specifies altitude (mountain wedding, ski trip, etc.) bias toward layering and warmer weights regardless of season. UV at altitude is intense even when ambient is cold — long sleeves are a feature, not a punishment.
+</details>
 
 ## Dress codes (event-driven)
 

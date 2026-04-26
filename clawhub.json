@@ -1,0 +1,31 @@
+{
+  "name": "buck-mason-stylist",
+  "namespace": "pima",
+  "version": "0.1.0",
+  "visibility": "public",
+  "description": "Personal shopping skill for Buck Mason — stock checks, wardrobe gap analysis, AI try-on lookbooks, and one-shot cart + checkout. Talks to /mcp/buckmason/* on pima.io; no company key required.",
+  "homepage": "https://github.com/buckmason/buck-mason-stylist-skill",
+  "license": "MIT",
+  "primaryEnv": ["OPENAI_API_KEY"],
+  "requires": {
+    "binaries": ["curl", "jq"],
+    "optional_binaries": ["magick", "wkhtmltopdf"],
+    "python": ["python-pptx", "Pillow"]
+  },
+  "categories": ["commerce", "image-generation", "lookbook"],
+  "tags": ["buck-mason", "pima", "stylist", "shopping", "stock", "mcp"],
+  "permissions": {
+    "network": [
+      {"host": "pima.io", "purpose": "MCP catalog/stock/locations/cart"},
+      {"host": "www.buckmason.com", "purpose": "MCP catalog/stock/locations/cart (public alias)"},
+      {"host": "cdn.shopify.com", "purpose": "Product imagery for lookbook generation"},
+      {"host": "api.openai.com", "purpose": "Image generation (gpt-image-1 / gpt-image-2)"}
+    ],
+    "filesystem": [
+      {"path": "<workspace>/profile.md", "mode": "read"},
+      {"path": "<workspace>/wardrobe.md", "mode": "read"},
+      {"path": "<workspace>/events.md", "mode": "read"},
+      {"path": "<workspace>/lookbook/", "mode": "write", "purpose": "Generated lookbook PNG/PDF/PPTX output"}
+    ]
+  }
+}

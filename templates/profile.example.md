@@ -7,8 +7,7 @@ Copy this file into your agent's persistent workspace as `profile.md` and fill i
 - name: Jane Doe
 - email: jane@example.com
 - gender: m                         # m / w / u — used for catalog filters and recommend
-- pima_live_key: <buckmason_live_key>   # required for every /mcp/* and /api/* call
-- pima_account_linked: false       # set true if you've logged in via /api/login
+- pima_account_linked: false       # set true if you've logged in via /api/login (only needed for account/checkout flows)
 - jwt: null                         # don't fill manually; agent stores after login
 
 ## Build (required for image-gen fidelity)

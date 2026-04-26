@@ -6,6 +6,18 @@ license: MIT
 authors:
   - Buck Mason / Pima
 runtime: any
+compatibility:
+  mcp_servers: [pima-mcp]
+  binaries: [curl, jq]
+metadata:
+  openclaw:
+    requires:
+      env: [OPENAI_API_KEY]
+      binaries: [curl, jq]
+      python: [python-pptx, Pillow]
+      optional_binaries: [magick, wkhtmltopdf]
+    categories: [commerce, image-generation, lookbook]
+    tags: [buck-mason, pima, stylist, shopping, stock, mcp]
 ---
 
 # Buck Mason personal stylist
@@ -42,50 +54,50 @@ If the customer is logged into buckmason.com, they can also link their Pima acco
 
 This skill is built on Pima's `/mcp/*` endpoints — a single, public, agent-friendly surface that returns rich product data, per-store inventory, and one-call cart links. **Read `references/mcp-api.md` for the full contract.**
 
-The legacy `/api/*` endpoints are still available (and documented in `references/pima-api.md`) for the cases `/mcp/*` doesn't cover yet — namely customer login, account/order history, and card-on-file checkout. You don't need them for the common shopping flow.
+The legacy `/api/*` endpoints are still available (and documented in `docs/advanced/pima-api.md`) for the cases `/mcp/*` doesn't cover yet — namely customer login, account/order history, and card-on-file checkout. You don't need them for the common shopping flow.
 
 | What you need | Endpoint | Notes |
 |---|---|---|
-| Browse / search catalog (with name, image, price, gender, sizes) | `GET /mcp/products` | Filters: `gender`, `category`, `style`, `color`, `q`, `recently_live`, `min_price`, `max_price`, `near_zip`/`radius_mi`. |
-| Single product detail (full image gallery + per-store stock) | `GET /mcp/products/:id` | `:id` is `slug`, `code`, or numeric id. |
-| Stock for a specific SKU at nearby stores | `GET /mcp/stock/:sku?near_zip=…&radius_mi=25` | Per-location counts, distance, pickup_enabled. |
-| Stores near a zip | `GET /mcp/locations?near_zip=…&radius_mi=25` | Pre-sorted by distance. |
-| What's new this season | `GET /mcp/seasonal?gender=…` | Recently-live products as season signal until the item-master branch lands. |
-| Taxonomy by gender | `GET /mcp/categories?gender=…` | |
-| Capsule recommendation for a context | `GET /mcp/recommend?gender=m&occasion=wedding&dress_code=smart_casual&sizes[shirt]=L&sizes[pant]=32x32&sizes[shoe]=10.5&near_zip=…` | Best-effort heuristic. |
-| Build a cart + checkout link | `POST /mcp/cart` | Stateless. Returns a Shopify cart permalink for the customer to open in their browser. |
+| Browse / search catalog (with name, image, price, gender, sizes) | `GET /mcp/buckmason/products` | Filters: `gender`, `category`, `style`, `color`, `q`, `recently_live`, `min_price`, `max_price`, `near_zip`/`radius_mi`. |
+| Single product detail (full image gallery + per-store stock) | `GET /mcp/buckmason/products/:id` | `:id` is `slug`, `code`, or numeric id. |
+| Stock for a specific SKU at nearby stores | `GET /mcp/buckmason/stock/:sku?near_zip=…&radius_mi=25` | Per-location counts, distance, pickup_enabled. |
+| Stores near a zip | `GET /mcp/buckmason/locations?near_zip=…&radius_mi=25` | Pre-sorted by distance. |
+| What's new this season | `GET /mcp/buckmason/seasonal?gender=…` | Recently-live products as season signal until the item-master branch lands. |
+| Taxonomy by gender | `GET /mcp/buckmason/categories?gender=…` | |
+| Capsule recommendation for a context | `GET /mcp/buckmason/recommend?gender=m&occasion=wedding&dress_code=smart_casual&sizes[shirt]=L&sizes[pant]=32x32&sizes[shoe]=10.5&near_zip=…` | Best-effort heuristic. |
+| Build a cart + checkout link | `POST /mcp/buckmason/cart` | Stateless. Returns a Shopify cart permalink for the customer to open in their browser. |
 | Customer login & past-order wardrobe seeding | `POST /api/login`, `GET /api/order_history?token=<jwt>` | Optional. |
 | Charge card on file | `POST /api/purchase` | Auth required + explicit "charge it" confirmation in the same turn. |
 
 **Gender awareness.** Always pass `gender` (`m`/`w`/`u`) on every catalog/recommend call once you've inferred it from the customer's profile. If the customer doesn't specify, ask once and save it to `profile.md`. The default profile template now includes a `gender:` field.
 
-**Seasonality.** Use `GET /mcp/seasonal?gender=…` to see what's freshly live on buckmason.com — that's the closest signal to "what's in season right now" until the FY26 item-master attributes ship. Combine with the calendar season (`references/seasons.md`) and the customer's region for outfit appropriateness.
+**Seasonality.** Use `GET /mcp/buckmason/seasonal?gender=…` to see what's freshly live on buckmason.com — that's the closest signal to "what's in season right now" until the FY26 item-master attributes ship. Combine with the calendar season (`references/seasons.md`) and the customer's region for outfit appropriateness.
 
-**Company key.** Every `/mcp/*` and `/api/*` call requires `?key=<live_key>` (Buck Mason's public live key). Store it once in `profile.md` (`pima_live_key:`) and append to every request.
+**Tenant slug.** Every MCP URL is path-tenanted: `https://www.buckmason.com/mcp/buckmason/...`. There is no key, header, or cookie required for MCP calls — Buck Mason's public catalog/stock/locations are all open. Only the legacy `/api/*` flows (login, account, checkout) need a key, which is documented in `docs/advanced/pima-api.md` if you need them.
 
 ## Workflows
 
-### 1. Stock check — "do they have the [item] in my size, online and near me?"
+### 1. Stock check — "do they have the [item] in my size, online and near me"
 
 1. **Resolve the item.** Search by name + color + gender:
-   `GET /mcp/products?key=…&gender=m&q=daily+shirt&color=olive`
+   `GET /mcp/buckmason/products?gender=m&q=daily+shirt&color=olive`
    If multiple match, present 2–3 with thumbnails (the response includes `image_url`) and ask the customer to pick.
 2. **Pull product detail with stores.** Once the slug is known:
-   `GET /mcp/products/<slug>?key=…&near_zip=<home_zip>&radius_mi=25`
+   `GET /mcp/buckmason/products/<slug>?near_zip=<home_zip>&radius_mi=25`
    The `variants[]` array now contains the variant matching the customer's size with online + per-store counts.
 3. **Match the size.** Pull from `profile.md` based on category (shirt/pant/short/shoe/jacket). Pick the matching `variant.size`. If the size doesn't exist in the profile for that category, ask once.
-4. **Present.** Lead with: "Online: ✓/✗ (qty). Nearby: list sorted by distance." Always include the product URL (from `product.url`). For a one-click buy, build the cart link via `POST /mcp/cart`.
+4. **Present.** Lead with: "Online: ✓/✗ (qty). Nearby: list sorted by distance." Always include the product URL (from `product.url`). For a one-click buy, build the cart link via `POST /mcp/buckmason/cart`.
 
-If you only have the SKU (not the product), skip steps 1–2 and go straight to `GET /mcp/stock/<sku>?near_zip=…&radius_mi=…`.
+If you only have the SKU (not the product), skip steps 1–2 and go straight to `GET /mcp/buckmason/stock/<sku>?near_zip=…&radius_mi=…`.
 
 ### 2. Wardrobe gap analysis — "what am I missing for [season/event]"
 
 1. Load `wardrobe.md`. If it's thin, offer to seed it from the customer's Pima order history (`POST /api/login`, then `GET /api/order_history?token=<jwt>`).
 2. Determine **season + climate + region** from today's date and event context (`references/seasons.md` — note the heat-type column: dry vs humid vs coastal-mild matters for fabric choice). Determine **dress-code tier** (`references/style-reasoning.md` formality scale, 1–6).
 3. Get a season-aware starting point:
-   `GET /mcp/seasonal?key=…&gender=<m|w>&days=45`
+   `GET /mcp/buckmason/seasonal?gender=<m|w>&days=45`
    This returns recently set-live products grouped by category — but treat it as one *input*, not the answer. "What's new" is not the same as "what's right." Cross-reference with classic staples regardless of recency.
-4. Ask `GET /mcp/recommend?key=…&gender=…&occasion=…&dress_code=…&sizes[shirt]=L&sizes[pant]=32x32&sizes[shoe]=10.5&near_zip=<home_zip>&budget=<from-profile-or-explicit>` for a heuristic capsule. Diff each slot against `wardrobe.md` — keep only the gaps.
+4. Ask `GET /mcp/buckmason/recommend?gender=…&occasion=…&dress_code=…&sizes[shirt]=L&sizes[pant]=32x32&sizes[shoe]=10.5&near_zip=<home_zip>&budget=<from-profile-or-explicit>` for a heuristic capsule. Diff each slot against `wardrobe.md` — keep only the gaps.
 5. **Apply the reasoning filter** (`references/style-reasoning.md`):
    - Drop picks whose fabric/weight is wrong for the climate (e.g., heavy oxford in humid heat).
    - Drop picks whose formality tier doesn't match the dress code.
@@ -102,9 +114,9 @@ Before posting to `/v1/images/edits`, assemble these in this exact order:
 
 1. **Identity anchors (≥ 2 photos):** load `profile.md → reference_photos`. Order them clean-portrait-first, then full-body, then any contextual shots. Refuse to generate with only one photo — ask for a second. One photo lets the model generalize; two locks it down; three is best.
 2. **Build + face fact sheet** from `profile.md` Build and Face sections — height, weight, build, shoulder/torso/leg ratios, posture, age range, hair, beard, eye color, skin tone, glasses, distinguishing features. Pass these as labeled lines in the prompt; do not let the model invent any of them.
-3. **Garment fact sheet per item** from `GET /mcp/products/<slug>` — color (name + visual + hex if known), fabric content, weight, weave, drape, silhouette, construction, fit on this customer's size. If a field can't be extracted from `description_md`, list it as missing rather than guessing — guessing produces wrong fabric weight, which is the most common image-gen failure mode.
-4. **Product flat-lay images** from `GET /mcp/products/<slug>/imagery` — use the `try_on` field (Buck Mason's flat-lay heuristic). One image per garment; pass them after the identity anchors.
-5. **Setting + composition** from `GET /mcp/lookbook/settings?occasion=…&season=…&region=…` — pick one entry from the returned `looks[]`, or roll your own only if the curated list doesn't fit.
+3. **Garment fact sheet per item** from `GET /mcp/buckmason/products/<slug>` — color (name + visual + hex if known), fabric content, weight, weave, drape, silhouette, construction, fit on this customer's size. If a field can't be extracted from `description_md`, list it as missing rather than guessing — guessing produces wrong fabric weight, which is the most common image-gen failure mode.
+4. **Product flat-lay images** from `GET /mcp/buckmason/products/<slug>/imagery` — use the `try_on` field (Buck Mason's flat-lay heuristic). One image per garment; pass them after the identity anchors.
+5. **Setting + composition** from `GET /mcp/buckmason/lookbook/settings?occasion=…&season=…&region=…` — pick one entry from the returned `looks[]`, or roll your own only if the curated list doesn't fit.
 3. For each look in the lookbook (typically 3–5):
    - Build an OpenAI image-edit call with: the reference photo as the subject, the product flat-lays as `image[]` references, and a prompt describing the setting (from event context — "golden-hour vineyard, Sonoma County, May, candid 35mm").
    - Use `model: "gpt-image-1"`, `quality: "high"`, `size: "1024x1536"` (portrait) by default.
@@ -117,7 +129,7 @@ Before posting to `/v1/images/edits`, assemble these in this exact order:
 
 1. Default path — **stateless cart link**:
    ```
-   POST /mcp/cart?key=…
+   POST /mcp/buckmason/cart
    { "items": [{"slug_or_code":"daily-shirt-olive","size":"L","qty":1},
                 {"slug_or_code":"tobacco-chino","size":"32x32","qty":1}],
      "coupon": "SPRING25" }
@@ -166,7 +178,7 @@ When choosing or recommending items, weight by (in this order):
 
 - `SKILL.md` — this file.
 - `references/mcp-api.md` — **primary** API reference: Pima's `/mcp/*` endpoints.
-- `references/pima-api.md` — fallback `/api/*` reference (login, account, order history, card-on-file checkout).
+- `docs/advanced/pima-api.md` — fallback `/api/*` reference (login, account, order history, card-on-file checkout).
 - `references/image-generation.md` — OpenAI image API prompt cookbook for try-on + lookbook.
 - `references/seasons.md` — season + region + heat-type mapping for outfit logic.
 - `references/style-reasoning.md` — the *why* engine: climate matrix, formality scale, classic-vs-trend filter, rationale format.

@@ -10,13 +10,12 @@ gender: m
 shirt: L
 home_zip: 94110
 favorites: [olive, indigo, navy, oat]
-pima_live_key: <key>
 ```
 
 Search the Pima catalog (gender + name + color, one call):
 
 ```
-GET /mcp/products?key=<key>&gender=m&q=daily+shirt&color=olive&per_page=5
+GET /mcp/buckmason/products?gender=m&q=daily+shirt&color=olive&per_page=5
 ```
 
 Response (truncated):
@@ -42,7 +41,7 @@ If multiple `Daily Shirt` matches come back (Long Sleeve, Short Sleeve, Heavywei
 ## 2. Get product detail with per-store stock
 
 ```
-GET /mcp/products/daily-shirt-olive?key=<key>&near_zip=94110&radius_mi=25
+GET /mcp/buckmason/products/daily-shirt-olive?near_zip=94110&radius_mi=25
 ```
 
 Response (truncated):
@@ -82,7 +81,7 @@ Nearby stores (within 25 mi of 94110):
 ## 4. Optional: build a 1-click cart link
 
 ```
-POST /mcp/cart?key=<key>
+POST /mcp/buckmason/cart
 Content-Type: application/json
 
 { "items": [{ "slug_or_code": "daily-shirt-olive", "size": "L", "qty": 1 }] }
@@ -106,13 +105,13 @@ Hand the customer the checkout URL.
 ## Edge cases
 
 - **Multiple "Daily Shirt" matches**: present 2–3 with thumbnails (`image_url`), ask the customer to pick. Don't guess.
-- **Customer specifies a store by name** ("the Hayes Valley one"): you can skip the radius and read directly off the location list returned by `/mcp/locations`.
+- **Customer specifies a store by name** ("the Hayes Valley one"): you can skip the radius and read directly off the location list returned by `/mcp/buckmason/locations`.
 - **Customer doesn't have a `home_zip` in profile**: ask once, save it, then proceed.
 - **Variant out of stock everywhere**: list available sizes for the same color (from the `variants[]` array), then offer a restock notification:
   ```
-  POST /api/restock_notifications?key=<key>
+  POST /api/restock_notifications
     product_code=DAILY-OLIVE-001
     size_name=L
     email=jane@example.com    # if guest
   ```
-- **Color resolution failure** ("army green" but only "olive" exists): ask whether olive matches or list all colors from the `/mcp/products?q=daily+shirt` results.
+- **Color resolution failure** ("army green" but only "olive" exists): ask whether olive matches or list all colors from the `/mcp/buckmason/products?q=daily+shirt` results.

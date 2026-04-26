@@ -4,7 +4,7 @@
 
 ## 1. Load context
 
-- `profile.md` → `gender: m`, sizes, fits, reference photo URL, `pima_live_key`, `home_zip`
+- `profile.md` → `gender: m`, sizes, fits, reference photo URL, `home_zip`
 - `wardrobe.md` → owned items
 - `events.md` → match "Sonoma wedding"
 
@@ -21,7 +21,7 @@ Apply `references/seasons.md`: late spring + NorCal coast/inland → mild + fogg
 Get a season-aware capsule recommendation (one call):
 
 ```
-GET /mcp/recommend?key=<key>&gender=m&occasion=wedding&dress_code=smart_casual&season=spring&near_zip=94110&radius_mi=25&sizes[shirt]=L&sizes[pant]=32x32&sizes[shoe]=10.5&sizes[jacket]=L
+GET /mcp/buckmason/recommend?gender=m&occasion=wedding&dress_code=smart_casual&season=spring&near_zip=94110&radius_mi=25&sizes[shirt]=L&sizes[pant]=32x32&sizes[shoe]=10.5&sizes[jacket]=L
 ```
 
 Response gives `capsule: [{slot: 'sport_coat', products: [...]}, {slot: 'shirt', ...}, {slot: 'pant', ...}, {slot: 'shoe', ...}]` — each product summary already includes `nearby_in_stock`, image, price.
@@ -40,7 +40,7 @@ Three looks:
 | 2 — daytime relaxed | none | pale-blue poplin | tobacco chino | suede chukka (owned) | none |
 | 3 — dinner-only | navy (owned) | white poplin | indigo jean (owned, dark) | brown suede dress shoe | pocket square |
 
-For each item not in the wardrobe, the `/mcp/recommend` response already has `image_url`, `price`, `nearby_in_stock`. If you need finer detail (full image gallery, per-store counts), call `GET /mcp/products/<slug>?key=…&near_zip=…&radius_mi=25`.
+For each item not in the wardrobe, the `/mcp/buckmason/recommend` response already has `image_url`, `price`, `nearby_in_stock`. If you need finer detail (full image gallery, per-store counts), call `GET /mcp/buckmason/products/<slug>?near_zip=…&radius_mi=25`.
 
 ## 3. Generate try-on images
 
@@ -142,7 +142,7 @@ lookbook/2026-05-30-sonoma-wedding/
 Look 2 needs 2 new items: pale-blue poplin (size L) + tobacco chino (size 32x32). One stateless call:
 
 ```
-POST https://www.buckmason.com/mcp/cart?key=<key>
+POST https://www.buckmason.com/mcp/buckmason/cart
 Content-Type: application/json
 
 { "items": [
