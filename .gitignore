@@ -1,0 +1,17 @@
+# Local generation artifacts (look images, product flat-lays, generated PDFs/decks, scratch shell scripts)
+test-output/
+
+# Editor / OS noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Python build artifacts (in case the pptx builder gets packaged later)
+__pycache__/
+*.pyc
+.venv/
+
+# Local secrets / dev env
+.env
+.env.local
