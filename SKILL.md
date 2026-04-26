@@ -150,6 +150,22 @@ Before posting to `/v1/images/edits`, assemble these in this exact order:
      "coupon": "SPRING25" }
    ```
    Response includes `checkout_url` (a Shopify cart permalink) and `subtotal`. Hand the URL to the customer; they review and pay in their browser.
+
+   **In-store pickup variant.** When the customer says "pickup", "I'll grab it", "have it ready at [store]", or names a Buck Mason store, build the cart with a pickup hint:
+   ```
+   POST /mcp/buckmason/cart
+   { "items": [...],
+     "pickup_location_slug": "abbot-kinney"   // OR "pickup_location_id": 2
+   }
+   ```
+   The MCP server attaches `?attributes[Pickup-Location]=<name>` to the returned `checkout_url` so the pickup option pre-selects on Shopify's checkout. **Before building**, confirm every SKU is in stock at the named store via `/mcp/buckmason/stock/:sku` (filter by SKU + location). Behaviour by stock state:
+   - All items in stock at the chosen store → build pickup cart, return `checkout_url` + a one-line "Ready for pickup at <store>" confirmation.
+   - Customer named a store but it's out of stock → suggest the nearest in-stock pickup-enabled store and confirm before building.
+   - Customer didn't name a store ("for pickup near me") → pick the nearest `pickup_enabled` store with all SKUs in stock; if none qualifies, fall back to ship-it with a one-line "no nearby store has all of these in stock; shipping default."
+   - Mixed availability across the chosen store → don't auto-split. Tell the customer the gap and ask: pickup the in-stock items + ship the rest as two carts, or ship the whole order as one.
+   - Pickup-disabled location → silently skip, pick the next-nearest.
+
+   Don't substitute sizes for pickup convenience. If the customer's exact size is out at the chosen store but a different size is in, surface and ask — never substitute silently.
 2. If the customer is logged in and wants to use a coupon or store credit before they hit Shopify, use `POST /api/update_cart` + `POST /api/add_coupon_or_customer_credit` (Pima-side cart) instead, then surface the resulting cart's checkout URL.
 3. **Do not call `POST /api/purchase` from the agent unless the customer explicitly says "charge my card on file"** *and* the request is in a session where the customer is authenticated and has a saved card (`order[use_existing_card]: true`). Even then, confirm the total in plain English first and require an unambiguous "yes, charge it" before submitting.
 

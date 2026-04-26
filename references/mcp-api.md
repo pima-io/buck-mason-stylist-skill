@@ -193,7 +193,7 @@ Response:
 
 When `budget` is set, the first product in each slot's `products` array is the one credited against the budget. Use the others as alternates if the customer wants to swap.
 
-## `POST /mcp/cart`
+## `POST /mcp/<company_slug>/cart`
 
 Stateless. Resolves items, returns a Shopify cart permalink the customer opens in their browser to checkout. No JWT, no Pima session, no card handling.
 
@@ -205,7 +205,9 @@ Body (JSON or form-encoded):
     { "slug_or_code": "daily-shirt-olive", "size": "L", "qty": 1 },
     { "slug_or_code": "tobacco-chino",     "size": "32x32", "qty": 1 }
   ],
-  "coupon": "SPRING25"
+  "coupon": "SPRING25",
+  "pickup_location_slug": "abbot-kinney",   // optional — see "In-store pickup" below
+  "pickup_location_id":   2                  // alternative; takes precedence if both present
 }
 ```
 
@@ -213,10 +215,16 @@ Response:
 
 ```json
 {
-  "checkout_url": "https://www.buckmason.com/cart/9999:1,9998:1?discount=SPRING25",
+  "checkout_url": "https://www.buckmason.com/cart/9999:1,9998:1?discount=SPRING25&attributes[Pickup-Location]=Abbot%20Kinney%20Men%27s",
   "coupon": "SPRING25",
   "subtotal_cents": 22600,
   "subtotal": "$226.00",
+  "pickup": {
+    "location_id": 2,
+    "location_name": "Abbot Kinney Men's",
+    "address": "1320 Abbot Kinney Blvd, Venice, CA 90291",
+    "all_items_in_stock": true
+  },
   "items": [
     { "product": { "id": 101, "code": "DAILY-OLIVE-001", "slug": "daily-shirt-olive",
                    "name": "Daily Shirt — Olive",
@@ -226,6 +234,23 @@ Response:
   ]
 }
 ```
+
+If `pickup_location_*` is omitted, the `pickup` block is absent from the response and the `checkout_url` has no `Pickup-Location` attribute (customer picks ship-vs-pickup at Shopify checkout).
+
+### In-store pickup contract
+
+When `pickup_location_slug` or `pickup_location_id` is present:
+
+1. Server resolves the location by slug (`name.parameterize`) or id; 404 if unknown.
+2. Server checks that the location is `pickup_enabled = true`; 422 `{ "error": "pickup not available at <store>" }` if not.
+3. Server checks every requested SKU has `>= qty` available units at that location. If any item is short:
+   - Default: 422 `{ "error": "items not in stock for pickup at <store>", "shortages": [{ "sku": "...", "wanted": 1, "available": 0 }, ...] }` — agent should fall back to ship-it or split the cart.
+   - With `?allow_pickup_partial=true`, the response is 200 but `pickup.all_items_in_stock = false` and `pickup.shortages` is populated — agent decides what to do.
+4. The `checkout_url` appends `?attributes[Pickup-Location]=<URL-encoded location.name>` (Shopify cart attribute). When the customer clicks the link, Shopify pre-selects the pickup option and the named store at the shipping step.
+
+**Discovery.** To enumerate pickup-enabled stores near the customer, use `/mcp/<company_slug>/locations?near_zip=<zip>&pickup_only=true`. Each location's `id` and `short_name` are usable as `pickup_location_id` / `pickup_location_slug`.
+
+**Implementation note.** The pickup contract is a planned extension to `/mcp/buckmason/cart` — the slug resolution, stock check, and `attributes[Pickup-Location]=` URL-encoding are not yet live in Pima as of v0.1.0 of this skill. Until then, the agent should fall back to building a ship-default cart and verbally telling the customer to choose pickup at checkout. Track Pima implementation: search the Pima repo for `pickup_location_slug`.
 
 For card-on-file checkouts (auth-required), continue to use `POST /api/purchase` after building a Pima cart via `POST /api/update_cart`. `POST /mcp/cart` is for the common, safer pattern of handing the user a checkout link.
 
