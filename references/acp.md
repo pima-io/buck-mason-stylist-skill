@@ -35,8 +35,20 @@ Every response carries the same envelope:
   "fulfillment_options": [...],
   "selected_fulfillment_option_id": "ship_3",
   "payment_options": [...],
-  "totals": { "subtotal_cents": 9800, "tax_cents": 0, "shipping_cents": 0, "total_cents": 9800, ... },
+  "totals": {
+    "subtotal_cents": 9800, "discount_cents": 0, "shipping_cents": 0,
+    "tax_cents": 0, "credit_applied_cents": 0,
+    "total_cents": 9800,            // gross order value
+    "charge_cents": 9800,           // amount that hits Stripe (total − credit)
+    "subtotal": "$98.00", "discount": "$0.00", "shipping": "$0.00",
+    "tax": "$0.00", "credit_applied": "$0.00",
+    "total": "$98.00", "charge": "$98.00"
+  },
   "coupon": null,
+  "coupon_status": {},
+  "customer_credit_codes": [],
+  "credit_status": [],
+  "credit_applied_cents": 0,
   "pickup_location_id": null,
   "order_id": null,
   "payment_intent_id": null,
@@ -81,7 +93,47 @@ Idempotency-Key: <uuid>          ← strongly recommended; safe-retries the same
 
 ## Step 2 (optional) — update before submitting
 
-Same envelope; PUT/PATCH any subset of `line_items`, `buyer`, `fulfillment_address`, `coupon`, `selected_fulfillment_option_id`. Totals + fulfillment_options recompute automatically when `line_items` change.
+Same envelope; PUT/PATCH any subset of `line_items`, `buyer`, `fulfillment_address`, `coupon`, `customer_credit_codes`, `selected_fulfillment_option_id`. Totals (including coupon discount + credit application) recompute automatically when any pricing input changes.
+
+### Coupons + customer credits — bearer codes (no auth)
+
+Both follow the same model as Buck Mason POS: anyone with the code can apply it (same security posture as a Starbucks gift card).
+
+```http
+POST /mcp/buckmason/acp/v1/checkouts
+{
+  "line_items": [...],
+  "buyer": {...},
+  "fulfillment_address": {...},
+  "coupon": "SPRING25",                        // single string — Pima Coupon
+  "customer_credit_codes": ["GC-12345"]        // array — Pima CustomerCredit (gift cards, store credit)
+}
+```
+
+**Coupon results** land in `coupon_status`:
+```json
+"coupon_status": { "code": "SPRING25", "applied": true, "amount_cents": 1000, "type": "percent" }
+// or, soft-warn on failure:
+"coupon_status": { "code": "BAD", "applied": false, "error": "coupon_not_found" }
+```
+
+**Credit results** land in `credit_status` — one entry per code, applied in order until the order is paid:
+```json
+"credit_status": [
+  { "code": "GC-12345", "applied": true, "amount_cents": 5000, "balance_remaining_cents": 0 },
+  { "code": "GC-67890", "applied": true, "amount_cents": 3000, "balance_remaining_cents": 1500 }
+]
+```
+
+**Failure modes per code** (each is a soft-warn — the checkout still creates):
+- `coupon_not_found` — unknown coupon
+- `coupon` `not_applicable` — exists but doesn't apply (cart total / category / customer rules)
+- `credit_not_found` — unknown credit code
+- `credit_disabled` — credit explicitly disabled
+- `credit_no_balance` — credit exhausted
+- `order_already_paid` — earlier credits in the array already covered the total
+
+**On `complete`**: Stripe is charged for `totals.charge_cents` (which is `total_cents − credit_applied_cents`). If credit covers the full order (`charge_cents == 0`), the SPT step is skipped entirely — `payment_data` becomes optional and Stripe is not called.
 
 ## Step 3 — explicit total confirmation
 
@@ -102,7 +154,6 @@ The agent never sees a PAN. SPT generation is a Stripe.js client-side operation 
 ```http
 POST /mcp/buckmason/acp/v1/checkouts/:id/complete
 Content-Type: application/json
-X-Customer-Confirmation: yes-charge-it      ← MUST be present and exactly this value
 ```
 ```json
 {
@@ -111,15 +162,16 @@ X-Customer-Confirmation: yes-charge-it      ← MUST be present and exactly this
 }
 ```
 
-→ `200 OK`, `state: "completed"`, with `order_id` and `payment_intent_id` populated.
+→ `200 OK`, `state: "completed"`, with `order_id` and `payment_intent_id` populated. The customer's consent is the SPT itself (Stripe-issued, scoped, time-limited) — there is no additional Pima-side confirmation header. The `acknowledged_total_cents` echo is the agent-side guard against hallucinated totals.
+
+If `totals.charge_cents == 0` (i.e., customer credit covered the full order), `payment_data` may be omitted entirely and Stripe is not called — `payment_intent_id` will be `null` in the completed checkout.
 
 ### Hard guarantees enforced by Pima
 
 | Guard | Behaviour on failure |
 |---|---|
-| Missing `X-Customer-Confirmation: yes-charge-it` header | `403 confirmation_required` |
-| `acknowledged_total_cents` ≠ server total | `422 total_mismatch` (with `server_total_cents` in error payload) |
-| Missing `payment_data.token` | `422 payment_data_required` |
+| `acknowledged_total_cents` ≠ server `total_cents` | `422 total_mismatch` (with `server_total_cents` in error payload) |
+| Missing `payment_data.token` when `charge_cents > 0` | `422 payment_data_required` |
 | Checkout already terminal | `409 checkout_terminal` |
 | Checkout expired (default 60 min) | `410 checkout_expired` |
 | Card declined / Stripe error | `402` with `code: card_declined` or `stripe_error` |
@@ -160,7 +212,6 @@ If `pickup_location_slug` (or `pickup_location_id`) was set on `/checkouts`, the
 [Stripe → agent SDK] spt_test_xyz
 
 [Agent → POST /mcp/buckmason/acp/v1/checkouts/01HXY…/complete]
-  X-Customer-Confirmation: yes-charge-it
   body: { payment_data: { type: "shared_payment_token", token: "spt_test_xyz" },
           acknowledged_total_cents: 9800 }
 [Pima → 200]
@@ -171,12 +222,15 @@ If `pickup_location_slug` (or `pickup_location_id`) was set on `/checkouts`, the
 
 ## Checkout safety — required prompt rules for any agent loading this skill
 
-- **Always read the total back to the user before completing.** Verbatim ("$98.00") and including currency.
-- **Require an unambiguous "yes/charge it" in the same turn as the read-back.** "OK" alone is not consent.
-- **Never call `/complete` from a chained tool-use without a fresh user message.** Confirmation must be explicit per checkout.
+The Stripe Shared Payment Token IS the user's consent (Stripe-issued, scoped, time-limited). The agent's responsibility is to make sure the user knows what they're authorizing before the SPT is minted, and to never silently retry on failure.
+
+- **Always read the total back to the user before requesting an SPT.** Verbatim ("$98.00 — $5.00 of that paid by gift card GC-12345; Stripe will charge $93.00") and including currency.
+- **Require an unambiguous "yes" in the same turn as the read-back, before showing the Stripe Payment Element.** "OK" alone is not consent.
+- **Never call `/complete` from a chained tool-use without a fresh user message.** Re-confirm each checkout.
 - **On any 4xx error from `/complete`, do NOT auto-retry.** Surface the error to the user. They decide what to do.
 - **On a `total_mismatch` 422, re-read the corrected total before re-attempting.** This catches hallucinated prices.
-- **Always disclose**: "Your card will be charged $X.XX through Stripe via Buck Mason."
+- **When announcing coupon/credit application, name the code and the saving.** "Applied SPRING25 (-$10) and gift card GC-12345 ($25 of $50 used)" — never silently apply.
+- **Always disclose** the payment processor: "Your card will be charged $X.XX through Stripe via Buck Mason."
 
 ## Discovery
 
