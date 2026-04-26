@@ -58,6 +58,7 @@ See `examples/stock-check.md` and `examples/lookbook.md` for full walkthroughs.
 | `references/image-generation.md` | OpenAI image-gen prompt cookbook + gpt-image-2 hint inventory |
 | `references/seasons.md` | Season + region + heat-type mapping |
 | `references/style-reasoning.md` | Climate matrix, formality scale, classic-vs-trend filter |
+| `references/output-formats.md` | Lookbook output: `images` / `ppt` / `html` builders + quickest-host options |
 | `templates/*.example.md` | Copy these into your workspace |
 | `examples/*.md` | End-to-end walkthroughs |
 | `PUBLISHING.md` | ClawHub distribution path |

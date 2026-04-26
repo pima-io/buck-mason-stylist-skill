@@ -121,7 +121,22 @@ Before posting to `/v1/images/edits`, assemble these in this exact order:
    - Build an OpenAI image-edit call with: the reference photo as the subject, the product flat-lays as `image[]` references, and a prompt describing the setting (from event context — "golden-hour vineyard, Sonoma County, May, candid 35mm").
    - Use `model: "gpt-image-1"`, `quality: "high"`, `size: "1024x1536"` (portrait) by default.
    - Save each generated image with a sortable filename (`lookbook/<date>-<event>-look-N.png`).
-4. Render the lookbook as a markdown summary: setting description, the look (item list with prices), generated image, and a "shop this look" link. Each item links to its product page; the bottom of the lookbook has a single "Build cart for this look" button (workflow 4).
+4. **Pick an output format.** Ask the customer once, default to PPT if they don't specify:
+
+   | Format | When to use | What it is |
+   |---|---|---|
+   | **`images`** (PNG only) | Quick iteration, "just show me the looks" | The raw `lookbook/<date>-<event>-look-N.png` files. Fastest. No assembly step. |
+   | **`ppt`** (default) | Sharing with a stylist / SO / yourself for review | A 16:9 `.pptx` with cover slide + one slide per look, each look showing the generated image alongside per-piece thumbnails, prices, clickable buckmason.com links, in-your-size stock per location, and a per-look total. Opens in Keynote / PowerPoint / Google Slides. |
+   | **`html`** | Public preview link, email body, anything that needs to render in a browser | A single self-contained `lookbook.html` with the same content as the PPT, viewable in any browser, easy to host or attach. Images embedded as base64 so the file works offline. |
+
+   Phrases that map to each format:
+   - `images` / "just the photos" / "PNG only"
+   - `ppt` / `pptx` / "slide deck" / "presentation" / "for [person]"
+   - `html` / "web page" / "shareable link" / "email me"
+
+   Build instructions per format are in **`references/output-formats.md`** — including the `python-pptx` builder, the HTML template + base64-embed step, and the must-haves for every format (clickable links, stock per piece in the customer's size, Look total).
+
+5. Render the lookbook in the chosen format. **Every format must include**: product names, prices, clickable buckmason.com links, in-your-size stock per location (bucketed: `In stock` / `Low (N)` / `Out`), and a per-look total. Each look gets a "Build cart for this look" handoff to workflow 4.
 
 **Always disclose** that the try-on images are AI-generated previews, not photos of real garments on the customer.
 
@@ -182,5 +197,6 @@ When choosing or recommending items, weight by (in this order):
 - `references/image-generation.md` — OpenAI image API prompt cookbook for try-on + lookbook.
 - `references/seasons.md` — season + region + heat-type mapping for outfit logic.
 - `references/style-reasoning.md` — the *why* engine: climate matrix, formality scale, classic-vs-trend filter, rationale format.
+- `references/output-formats.md` — how to render the lookbook as `images` / `ppt` / `html`, plus quickest hosting options for the HTML format.
 - `templates/profile.example.md`, `wardrobe.example.md`, `events.example.md` — copy these into the customer's workspace and fill in.
 - `examples/stock-check.md`, `examples/lookbook.md` — concrete walkthroughs of the two main flows.
