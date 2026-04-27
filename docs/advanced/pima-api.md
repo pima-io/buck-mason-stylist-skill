@@ -1,22 +1,31 @@
 # Pima API reference (customer-facing endpoints)
 
-> For shopping flows, **start with `references/mcp-api.md`** (the `/mcp/*` endpoints). They give you rich product data, per-store stock, and one-call cart links without any of the auth/session juggling below. Use this `/api/*` reference only for: customer login, account/order history (wardrobe seeding), restock notifications, and card-on-file checkout.
+> For shopping flows, **start with `references/mcp-api.md`** (the `/mcp/*` endpoints). They give you rich product data, per-store stock, and one-call cart links without any of the auth/session juggling below. Use this `/api/*` reference for the customer-facing flows powering **orders.buckmason.com** (the Returns Management and Order Tracking portal): order history with shipment + tracking, return creation, exchange options, and card-on-file checkout.
 
-Base URL for Buck Mason: `https://www.buckmason.com` (the Pima app serves `/api/*` from the same host as the storefront).
+Base URL: **`https://pima.io/api`**. Same host as the MCP endpoints (`https://pima.io/mcp/...`); different prefix.
 
 All endpoints return JSON unless noted. Successful responses are 200 OK; errors return `{ "error": "…" }` or `{ "errors": { … } }`.
 
 ## Auth
 
-Three modes coexist:
+Every `/api/*` request requires the **public company key** as a query param:
+
+```
+?key=<pima_company_key>
+```
+
+For Buck Mason the value is **`pkLOMQfU1qM`**. This is the same `REACT_APP_PIMA_KEY` shipped in the orders.buckmason.com React bundle to every customer's browser — it identifies the brand, not the user, and is brand-public by design (rotating it is a brand-wide ops action, not a per-customer secret). Bake it into the HTTP client's defaults so every call gets it (the RMS frontend does exactly this — see `pima-api.js` in the buckmason-rms repo).
+
+On top of that, individual endpoints layer one of:
 
 | Mode | How | Used by |
 |---|---|---|
-| **Guest** (no auth) | Just call the endpoint | Catalog, locations, cart, public product data |
-| **Customer JWT** | `Authorization: Bearer <jwt>` header (or `?token=<jwt>` query param on some endpoints) | Account, orders, order history, returns |
+| **Guest** (key only) | `?key=<pima_company_key>` | `POST /api/verify_order_or_email`, public catalog endpoints |
+| **Guest order code** | `?key=<pima_company_key>&order_code=<code>` (the order number from the confirmation email) | `GET /api/order_history`, return creation, label purchase — when the customer is not logged in |
+| **Customer JWT** | `Authorization: <jwt>` header (raw token, no `Bearer` prefix — the RMS sets it as `api.defaults.headers.common['Authorization'] = jwt`) | All the above + `/api/account`, `/api/address`, `/api/purchase` |
 | **Inventory API key** | `?token=<inventory_api_key>` query param | `GET /api/inventory`, `GET /api/customers` (CSV streaming, partner-only) |
 
-The JWT comes from `POST /api/login` or `POST /api/register`. Persist it for the session and resend on every authenticated call.
+The JWT comes from `POST /api/login_via_token` (magic-link flow) or `POST /api/login` / `POST /api/register`. Persist it for the session.
 
 ## Catalog
 
@@ -203,16 +212,23 @@ Failure: `{ "errors": { ... }, "order": {...}, "to_capture_amount": 5000 }`.
 
 **Recommended pattern for agent-driven shopping:** instead of calling `/api/purchase` directly, build the cart via `/api/update_cart` then surface a Shopify checkout URL (`https://www.buckmason.com/cart/<variant_id>:1,<variant_id>:1`) for the customer to complete in their browser. Only call `/api/purchase` if the customer has explicitly authorized a card-on-file charge in the same turn.
 
-## Orders
+## Orders + Returns + Order Tracking
 
-### `GET /api/orders`  *(auth required)*
-Paginated past orders. `?page=2` for pagination.
+These are the endpoints that power **orders.buckmason.com** (the Returns Management and Order Tracking portal). Verified against `buckmason-rms/src/pima-api.js`.
 
-### `GET /api/orders/:id`
-Single order by code or numeric ID. Auth required if the order belongs to a logged-in customer.
+### `POST /api/verify_order_or_email`  *(guest, key only)*
+First step of the magic-link flow. Body: `{ value: "<email or order_code>", source: "returns" }`. Returns whether the value matches an email (in which case Pima sends a magic-link email; redeem with `/api/login_via_token`) or an order code (which the agent can then pass as `?order_code=` on subsequent calls).
 
-### `GET /api/order_history?token=<jwt or order_code>`
-Customer's last year of orders, with shipment + tracking + estimated delivery date. Pass `?token=<jwt>` for the customer, or `?order_code=<code>` for a single guest order.
+### `POST /api/login_via_token`
+Body: `{ token: "<magic-link-token>" }`. Returns a JWT. Set as `Authorization: <jwt>` header (raw value, no `Bearer` prefix) on subsequent calls.
+
+### `GET /api/order_history?page=N`  *(auth or `?order_code=`)*
+Customer's last year of orders, with shipment + tracking + estimated delivery date. Three call patterns:
+- Logged-in customer: `Authorization: <jwt>` header (already set on the client default)
+- Guest with order code: `?order_code=<code>` (the order number from the confirmation email)
+- Both: header takes precedence
+
+Always include `?key=<pima_company_key>`. `?page=N` for pagination.
 
 ```json
 [
@@ -238,6 +254,36 @@ Customer's last year of orders, with shipment + tracking + estimated delivery da
 ```
 
 This is the cleanest endpoint for **wardrobe seeding** — every item the customer has bought, with image thumbnails, sizes, and SKUs.
+
+### `GET /api/return_reasons`
+List of plain-text reasons (`["Doesn't fit", "Wrong color", "Damaged", ...]`) the customer must pick from when starting a return. Cache for the session.
+
+### `GET /api/exchange_options/:order_item_id`
+For a specific OrderItem, returns the available size/color exchange variants. Use when the customer wants an exchange instead of a refund.
+
+### `GET /api/return_shipping_rates`
+Available carriers + prices for the return label. The RMS sorts ascending by price; the cheapest is usually the default. Each rate has `id`, `name`, `price` (cents).
+
+### `GET /api/return_locations`
+Store drop-off points (skip the carrier label entirely). Returns each store's address + hours.
+
+### `GET /api/address`  *(auth or order_code)*
+Customer's saved shipping address — pre-fills the return-label form.
+
+### `POST /api/create_customer_return`
+Body wrapper: `{ customer_return: { items_attributes: [...], return_reason_id: ..., shipping_rate_id: ... } }`. Returns the created `CustomerReturn` with an `id`. Confirm the return with the customer before calling.
+
+### `GET /api/customer_returns/:id`
+Fetch a created return's current state (label URL, refund status, etc.).
+
+### `POST /api/customer_returns/:id/purchase_postage`
+Buys the actual return shipping label via the chosen rate. Returns the label URL — surface it directly so the customer can print it.
+
+### `POST /api/shipping_payment_token`
+Body: `{ shipping_rate_id: <id> }`. Returns a Stripe-side payment token used to charge the customer for the return label (when they're paying for return shipping themselves rather than the merchant covering it).
+
+### `POST /api/generate_shopify_multipass`  *(auth required)*
+Returns a Shopify Multipass URL that logs the customer into buckmason.com without re-prompting for credentials — used by the RMS to deep-link a customer into Shopify checkout for an exchange purchase.
 
 ## Common JSON shapes
 

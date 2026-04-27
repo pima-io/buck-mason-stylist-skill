@@ -8,7 +8,7 @@ A purpose-built, agent-friendly surface that wraps the same Pima data exposed un
 
 ## Common conventions
 
-- **Base URL**: `https://www.buckmason.com` (or whatever host serves Pima).
+- **Base URL**: `https://pima.io` (the Pima MCP host). For Buck Mason all paths are `https://pima.io/mcp/buckmason/...`.
 - **Tenant selection**: every path is prefixed with `/mcp/<company_slug>/...`. For Buck Mason, the slug is `buckmason`. Slugs are derived from the company name via `name.parameterize` (so "Buck Mason" → `buckmason`).
 - **Auth**: none. All endpoints are public — no key, header, or cookie required.
 - **Money**: every endpoint returns both `*_cents` (integer) and a pre-formatted string (`"$98.00"`).

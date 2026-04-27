@@ -48,13 +48,26 @@ The customer should keep three plain-text files under their agent's persistent m
 
 Templates are in `templates/` — `profile.example.md`, `wardrobe.example.md`, `events.example.md`. On first run, if `profile.md` is missing, walk the customer through filling it in. Don't ask for everything at once — start with sizes (shirt, pant waist+inseam, short, jacket, shoe), then home zip, then save and proceed.
 
-If the customer is logged into buckmason.com, they can also link their Pima account via `POST /api/login`; the skill will then merge their on-file sizes (`account.sizes`) and past order history into the local files. Account linking is optional — everything works as a guest too.
+If the customer wants the skill to access their account-wide history (all past orders for wardrobe seeding), the agent runs the email + magic-link flow (`POST /api/verify_order_or_email` → email sent → `POST /api/login_via_token` returns a JWT). **This requires the agent to have a tool that reads the customer's email** (e.g., a Gmail MCP server) or to ask the customer to paste the link back from their inbox. Always confirm the retrieval method with the user before sending the email. Account linking is optional — most order-tracking and return flows can use the guest `?order_code=<code>` path instead, which sidesteps the email entirely (workflow #5).
 
 ## Data sources
 
+### Browse the storefront before you query
+
+Before reaching for the MCP, **read `https://www.buckmason.com` directly** — it's the single best place to absorb the brand vibe, see what's on the homepage right now, find collection narratives ("Spring '26 Linen Capsule"), and discover products organically the way a customer would. Use the storefront for:
+
+- **Discovery** — "What is Buck Mason putting front and center this week?" → hit `/`, `/collections/men`, `/collections/sale`, the campaign pages linked from the nav. The product slugs you'll find there map 1:1 to MCP slugs (`/products/<slug>` → `/mcp/buckmason/products/<slug>`).
+- **Vibe / brand voice** — copy decks, model photography, color palette, formality level. The MCP returns structured data; the storefront tells you how the brand wants you to talk about it.
+- **What the user might want** — when the user is vague ("something for spring") or asks "what would you recommend?", browse buckmason.com first to see the current season's hero pieces, then drill into the MCP for sizes/stock/imagery on the specific items you want to pitch.
+- **Cross-checking** — confirm pricing, color names, copy descriptions, and whether a product is still live on the site (an MCP record can lag the storefront briefly during a Shopify push).
+
+**Workflow:** browse buckmason.com → land on a candidate set → switch to MCP for structured queries (stock by size + nearby store, full image gallery, capsule recommendations, cart, checkout). Don't skip the storefront step for open-ended requests — the MCP is for *exact* lookups; the storefront is for *finding the question*.
+
+### MCP — structured catalog + transactions
+
 This skill is built on Pima's `/mcp/*` endpoints — a single, public, agent-friendly surface that returns rich product data, per-store inventory, and one-call cart links. **Read `references/mcp-api.md` for the full contract.**
 
-The legacy `/api/*` endpoints are still available (and documented in `docs/advanced/pima-api.md`) for the cases `/mcp/*` doesn't cover yet — namely customer login, account/order history, and card-on-file checkout. You don't need them for the common shopping flow.
+The `/api/*` endpoints (documented in `docs/advanced/pima-api.md`) power **orders.buckmason.com** — Buck Mason's live Returns Management and Order Tracking portal — and cover everything the MCP doesn't: customer login, account, order history with shipment + tracking, return initiation, and card-on-file checkout. They're production-grade and current; they're "outside the MCP" only because they need a customer JWT (or an order_code for guest lookups), not because they're deprecated. Reach for them whenever the user asks about an existing order, fulfillment status, or starting a return.
 
 | What you need | Endpoint | Notes |
 |---|---|---|
@@ -66,14 +79,16 @@ The legacy `/api/*` endpoints are still available (and documented in `docs/advan
 | Taxonomy by gender | `GET /mcp/buckmason/categories?gender=…` | |
 | Capsule recommendation for a context | `GET /mcp/buckmason/recommend?gender=m&occasion=wedding&dress_code=smart_casual&sizes[shirt]=L&sizes[pant]=32x32&sizes[shoe]=10.5&near_zip=…` | Best-effort heuristic. |
 | Build a cart + checkout link | `POST /mcp/buckmason/cart` | Stateless. Returns a Shopify cart permalink for the customer to open in their browser. |
-| Customer login & past-order wardrobe seeding | `POST /api/login`, `GET /api/order_history?token=<jwt>` | Optional. |
+| Customer login & past-order wardrobe seeding | `POST /api/verify_order_or_email` → magic link → `POST /api/login_via_token` → `GET /api/order_history` | Optional. Requires the agent to read the customer's email OR the customer to paste the link back. Use the `?order_code=` path (next row) if the user just wants one order, not their full history. |
+| **Order tracking + fulfillment status** | `GET /api/order_history?token=<jwt>` (auth) **or** `?order_code=<code>` (guest) | Returns shipments[] with `status`, `tracking_code`, `tracking_url`, `shipped_at`, `estimated_delivery_at`. Same endpoint that powers orders.buckmason.com. |
+| **Initiate / manage a return** | `POST /api/customer_returns` + the return_reasons / shipping_rates helpers in `docs/advanced/pima-api.md` | Powers the Returns Management portal at orders.buckmason.com. |
 | Charge card on file | `POST /api/purchase` | Auth required + explicit "charge it" confirmation in the same turn. |
 
 **Gender awareness.** Always pass `gender` (`m`/`w`/`u`) on every catalog/recommend call once you've inferred it from the customer's profile. If the customer doesn't specify, ask once and save it to `profile.md`. The default profile template now includes a `gender:` field.
 
 **Seasonality.** Use `GET /mcp/buckmason/seasonal?gender=…` to see what's freshly live on buckmason.com — that's the closest signal to "what's in season right now" until the FY26 item-master attributes ship. Combine with the calendar season (`references/seasons.md`) and the customer's region for outfit appropriateness.
 
-**Tenant slug.** Every MCP URL is path-tenanted: `https://www.buckmason.com/mcp/buckmason/...`. There is no key, header, or cookie required for MCP calls — Buck Mason's public catalog/stock/locations are all open. Only the legacy `/api/*` flows (login, account, checkout) need a key, which is documented in `docs/advanced/pima-api.md` if you need them.
+**Tenant slug + host.** Every MCP URL is hosted at `https://pima.io/mcp/<company_slug>/...`. For Buck Mason: `https://pima.io/mcp/buckmason/...`. There is no key, header, or cookie required for MCP calls — Buck Mason's public catalog/stock/locations are all open. The `/api/*` flows (login, account, order tracking, returns, checkout) need a customer JWT or guest order_code and are served from the Buck Mason customer host (`https://www.buckmason.com/api/...` and `https://orders.buckmason.com` for the Returns Management and Order Tracking portal). Full reference in `docs/advanced/pima-api.md`.
 
 ## Workflows
 
@@ -92,7 +107,7 @@ If you only have the SKU (not the product), skip steps 1–2 and go straight to 
 
 ### 2. Wardrobe gap analysis — "what am I missing for [season/event]"
 
-1. Load `wardrobe.md`. If it's thin, offer to seed it from the customer's Pima order history (`POST /api/login`, then `GET /api/order_history?token=<jwt>`).
+1. Load `wardrobe.md`. If it's thin, offer to seed it from the customer's Pima order history. Account-wide seeding requires the magic-link flow (`POST /api/verify_order_or_email` → the customer clicks the email link OR the agent reads it from a connected inbox tool → `POST /api/login_via_token` → `GET /api/order_history`). **Confirm with the user how the link will be retrieved before sending the email** (workflow #5 step 1c). If the user only wants to seed wardrobe from one or two recent orders, ask for the order numbers and use the `?order_code=` path instead — no email round-trip.
 2. Determine **season + climate + region** from today's date and event context (`references/seasons.md` — note the heat-type column: dry vs humid vs coastal-mild matters for fabric choice). Determine **dress-code tier** (`references/style-reasoning.md` formality scale, 1–6).
 3. Get a season-aware starting point:
    `GET /mcp/buckmason/seasonal?gender=<m|w>&days=45`
@@ -171,6 +186,37 @@ Before posting to `/v1/images/edits`, assemble these in this exact order:
 
 4. **Fully agent-driven checkout (ACP path).** When the customer wants the agent to handle the entire transaction — line items, shipping, payment, confirmation — without bouncing to a browser, use the spec-conformant Stripe / OpenAI **Agentic Commerce Protocol** endpoints at `/mcp/buckmason/acp/v1/checkouts/*`. Required when the surface has no browser (voice agents, concierge flows, headless installations). The Stripe Shared Payment Token is the customer's consent — always read the total back first, always show the Stripe Payment Element only after an unambiguous "yes", and echo `acknowledged_total_cents` on `/complete` to catch hallucinated totals. Coupons (`coupon: "..."`) and customer credits (`customer_credit_codes: [...]`) work as bearer codes — same model as POS. The full lifecycle, guardrails (idempotency, total mismatch, expired checkout, card decline), coupon/credit envelope, and worked transcript are in **`references/acp.md`** — read it before invoking any ACP endpoint.
 
+### 5. Order tracking + returns — "where's my order" / "I want to return this"
+
+These are the most common post-purchase questions. They run on the same `/api/*` endpoints that power **orders.buckmason.com** (the Returns Management and Order Tracking portal).
+
+1. **Identify the order.** Three paths, in this preference order — pick the lowest-friction one the user can satisfy:
+
+   **a. Saved JWT** *(zero friction — no user action)*. If `profile.md → jwt` is set from a previous session, just resend it on `Authorization: <jwt>` (raw, no `Bearer` prefix). Skip to step 2.
+
+   **b. Order code** *(lowest friction — recommended default for one-off lookups)*. Ask the user for their order number (e.g., `BM-12345`) — it's at the top of every order-confirmation email and on the printed receipt. Then pass `?order_code=<code>` on every `/api/*` call for the rest of this conversation. **No email read, no magic link, no JWT.** This is the right path for "where's my order?" and most return flows.
+
+   **c. Email + magic link** *(high friction — only when the user wants account-wide access, e.g., to see all past orders for wardrobe seeding)*. This is a two-step flow:
+     1. `POST /api/verify_order_or_email` with `{ value: "<email>", source: "returns" }` — Pima emails a magic link to the customer.
+     2. The customer clicks the link in their inbox, OR the agent reads the email itself and extracts the token, OR the customer pastes the URL/token back into the chat. Then `POST /api/login_via_token` with `{ token: "<token>" }` returns a JWT. Save it to `profile.md → jwt` so the next session starts at path (a).
+
+   **CRITICAL — magic-link capability check.** The magic-link path requires the agent to either:
+   - Have a tool that reads the customer's email (e.g., a Gmail MCP server with read scope on the inbox of the email used for the purchase), OR
+   - Ask the customer to forward / paste back the link from their inbox (manual relay).
+
+   **Before triggering `/api/verify_order_or_email`, confirm with the user how the link will be retrieved.** Surface the options in plain English: "I can either read the link from your inbox if you've connected an email tool, or you can paste it back to me after it arrives — which would you prefer?" Don't silently fire the email and then deadlock waiting for the token.
+
+   **Always prefer (b) when possible.** "Do you have your order number?" is a one-second question and avoids both the email round-trip and the email-access permission. Only fall through to (c) when the user explicitly wants account-wide access (e.g., wardrobe seeding from full order history).
+2. **Fetch status.** `GET /api/order_history?token=<jwt>` (or `?order_code=…`) returns the order with a `shipments[]` array — each shipment has `status` (`processing` / `shipped` / `delivered` / `delayed`), `tracking_code`, `tracking_url`, `shipped_at`, and `estimated_delivery_at`. Lead with the soonest estimated delivery + carrier link; mention any in-transit warning.
+3. **Initiate a return.** If the user wants to return an item:
+   - Pull the eligible items from the order (`order.items[].returnable: true` — anything not yet past Buck Mason's return window).
+   - Surface the available `return_reasons` from `GET /api/return_reasons` (plain-text labels like "Doesn't fit", "Wrong color").
+   - Ask which items + which reason, confirm, then `POST /api/customer_returns` with the chosen items + reason + the return shipping rate from `GET /api/shipping_rates`.
+   - Hand back the return label URL from the response so the customer can print it.
+4. **Surface the portal directly.** For complex multi-item returns or anything the agent can't fully handle, link the customer to **https://orders.buckmason.com/<order_code>** — the same flows as above, but in the customer's browser with full UI.
+
+Don't fabricate tracking numbers or delivery dates from training data. If `/api/order_history` doesn't return what you need, say so and link the customer to orders.buckmason.com.
+
 ## Checkout safety
 
 A shopping agent has full read/write access to a checkout flow. Treat any tool call that moves money as a destructive action that needs explicit confirmation in the same turn:
@@ -211,7 +257,7 @@ When choosing or recommending items, weight by (in this order):
 
 - `SKILL.md` — this file.
 - `references/mcp-api.md` — **primary** API reference: Pima's `/mcp/*` endpoints.
-- `docs/advanced/pima-api.md` — fallback `/api/*` reference (login, account, order history, card-on-file checkout).
+- `docs/advanced/pima-api.md` — `/api/*` reference (login, account, **order history with shipment + tracking**, **return initiation**, card-on-file checkout). Powers orders.buckmason.com (Returns Management and Order Tracking portal). Used by workflow #5.
 - `references/image-generation.md` — OpenAI image API prompt cookbook for try-on + lookbook.
 - `references/seasons.md` — season + region + heat-type mapping for outfit logic.
 - `references/style-reasoning.md` — the *why* engine: climate matrix, formality scale, classic-vs-trend filter, rationale format.

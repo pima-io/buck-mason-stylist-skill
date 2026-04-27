@@ -142,7 +142,7 @@ lookbook/2026-05-30-sonoma-wedding/
 Look 2 needs 2 new items: pale-blue poplin (size L) + tobacco chino (size 32x32). One stateless call:
 
 ```
-POST https://www.buckmason.com/mcp/buckmason/cart
+POST https://pima.io/mcp/buckmason/cart
 Content-Type: application/json
 
 { "items": [
