@@ -101,11 +101,14 @@ Cache-Control: no-store
     { "type": "shared_payment_token", "provider": "stripe", "protocol": "mpp_v1",
       "protocol_homepage": "https://mpp.dev",
       "network_id": "profile_…", "amount_cents": 53200, "currency": "usd" }
-  ]
+  ],
+  "suggested_context": "Authorize a $532.00 charge by Buck Mason: 1× Olive Daily Shirt (size L), 1× Ford Chino (size 32), 2× Breeze Linen (size M), shipping to Venice, CA, pickup at Abbot Kinney Mens via the mpp.dev Merchant Payments Protocol."
 }
 ```
 
 Each line item's `to_pickup` + `pickup_location_name` tell the agent how to read the cart back to the customer: "Olive Daily Shirt ships to your address; Ford Chino is reserved for pickup at Abbot Kinney Mens; 2× Breeze Linen reserved for pickup at Venice Flagship."
+
+> **`suggested_context`** is a pre-built ≥100-char human-readable summary the agent should pass verbatim to `link-cli spend-request create --context`. As of 2026-04-29 the Link app's spend-request approval surface renders **only** the merchant name + this context blurb — it ignores `line_items`, prices, and `image_url` thumbnails on both the SPT and card credential surfaces. Until Stripe ships line-item rendering on this surface, this string is the only customer-visible cart preview at the approval moment.
 
 ### Phase 2 — read total back, mint SPT, retry with Authorization
 
