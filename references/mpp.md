@@ -32,28 +32,51 @@ Idempotency-Key: <uuid>          ← optional but recommended; forwarded to Stri
 ```
 ```json
 {
-  "line_items": [{ "sku": "OLIVE-DAILY-SHIRT-L", "quantity": 1 }],
+  "line_items": [
+    { "sku": "OLIVE-DAILY-SHIRT-L", "quantity": 1 },
+    { "sku": "FORD-CHINO-32",       "quantity": 1, "pickup_location_slug": "abbot-kinney" },
+    { "sku": "BREEZE-LINEN-M",      "quantity": 2, "pickup_location_name": "VEN" }
+  ],
   "buyer": { "name": "Jane Doe", "email": "jane@example.com", "phone": "+15555550100" },
   "fulfillment_address": { "line1": "1320 Abbot Kinney Blvd", "city": "Venice",
                            "state": "CA", "postal_code": "90291", "country": "US" },
-  "pickup_location_slug": "abbot-kinney",   // optional
+  "pickup_location_slug": "abbot-kinney",   // optional cart-level default; applied
+                                            //  to any line item that didn't specify
+                                            //  its own pickup_location_*
   "coupon": "SPRING25",                     // optional, bearer code
   "customer_credit_codes": ["GC-12345"]     // optional, bearer codes
 }
 ```
 
+**Per-line-item pickup location** (the only fulfillment-routing decision a customer can make). Each line item accepts any one of:
+- `pickup_location_slug`: `"abbot-kinney"` — preferred; matches against the location's `short_name.parameterize` or `name.parameterize`
+- `pickup_location_id`: `2` — direct numeric id
+- `pickup_location_name`: `"Abbot Kinney Mens"` OR the short_name `"AKMens"` — case-insensitive. Shopify uses the short_name in its `line_item[:properties]` "Location" value; MPP accepts both so the agent can use whichever it has.
+
+A line item with no pickup_location ships from the warehouse. A line item with a pickup_location is reserved for in-store pickup at that store. A cart can mix ship + pickup items in any combination.
+
+> **Note: pickup vs fulfillment.** The customer-facing input is *pickup_location* (where they want to physically pick up the item). Pima also has an internal *fulfillment_location* concept on each OrderItem, but that's different — for ship items it's set later by automatic or CX/warehouse-agent routing, never by the customer. Agents should only ever speak `pickup_location_*` in MPP requests.
+
 Server response:
 
 ```http
 HTTP/1.1 402 Payment Required
-WWW-Authenticate: Payment realm="pima", scheme="shared_payment_token", amount=9800, currency="usd"
+WWW-Authenticate: Payment id="01HX…", realm="pima.io", method="stripe",
+                  intent="charge", request="<base64url(payment-request-json)>"
 Cache-Control: no-store
 ```
 ```json
 {
   "payment_required": true,
   "currency": "usd",
-  "line_items": [...],
+  "line_items": [
+    { "sku": "OLIVE-DAILY-SHIRT-L", "quantity": 1, "unit_price_cents": 9800,
+      "pickup_location_id": null, "pickup_location_name": null, "to_pickup": false },
+    { "sku": "FORD-CHINO-32", "quantity": 1, "unit_price_cents": 16800,
+      "pickup_location_id": 2, "pickup_location_name": "Abbot Kinney Mens", "to_pickup": true },
+    { "sku": "BREEZE-LINEN-M", "quantity": 2, "unit_price_cents": 18800,
+      "pickup_location_id": 5, "pickup_location_name": "Venice Flagship", "to_pickup": true }
+  ],
   "buyer": {...},
   "fulfillment_address": {...},
   "pickup_location_id": 2,
@@ -66,21 +89,23 @@ Cache-Control: no-store
   ],
   "credit_applied_cents": 5000,
   "totals": {
-    "subtotal_cents": 9800, "discount_cents": 1000, "shipping_cents": 0,
+    "subtotal_cents": 64200, "discount_cents": 1000, "shipping_cents": 0,
     "tax_cents": 0, "credit_applied_cents": 5000,
-    "total_cents": 8800,                  // gross order value
-    "charge_cents": 3800,                 // amount Stripe will charge after credit
-    "subtotal": "$98.00", "discount": "$10.00", "shipping": "$0.00",
+    "total_cents": 58200,                 // gross order value
+    "charge_cents": 53200,                // amount Stripe will charge after credit
+    "subtotal": "$642.00", "discount": "$10.00", "shipping": "$0.00",
     "tax": "$0.00", "credit_applied": "$50.00",
-    "total": "$88.00", "charge": "$38.00"
+    "total": "$582.00", "charge": "$532.00"
   },
   "payment_options": [
     { "type": "shared_payment_token", "provider": "stripe", "protocol": "mpp_v1",
       "protocol_homepage": "https://mpp.dev",
-      "amount_cents": 3800, "currency": "usd" }
+      "network_id": "profile_…", "amount_cents": 53200, "currency": "usd" }
   ]
 }
 ```
+
+Each line item's `to_pickup` + `pickup_location_name` tell the agent how to read the cart back to the customer: "Olive Daily Shirt ships to your address; Ford Chino is reserved for pickup at Abbot Kinney Mens; 2× Breeze Linen reserved for pickup at Venice Flagship."
 
 ### Phase 2 — read total back, mint SPT, retry with Authorization
 
@@ -117,12 +142,33 @@ Cache-Control: no-store
 ```json
 {
   // ...same cart envelope as phase 1 plus:
-  "state": "completed",
-  "order_id": 9876,
-  "order_code": "BM-9876",
+  "state": "completed",                        // the MPP-checkout state, not the Pima Order status
+  "order_code": "BM-9876",                     // the customer-facing order identifier
   "payment_intent_id": "pi_3OabcXYZ..."
 }
 ```
+
+> `order_id` is intentionally **not** in the response — it's a Pima-internal primary key. `order_code` is the customer-facing identifier (the same one printed on every order-confirmation email and used by orders.buckmason.com lookups).
+
+**What Pima creates server-side** when phase 2 succeeds:
+
+- A real **Customer** (guest if `buyer.email` doesn't match an existing record).
+- A real **CustomerAddress** populated from `buyer.{name, email, phone}` and `fulfillment_address.{line1, line2, city, state, postal_code, country}`.
+- A real **Order** with:
+  - `status: "new"` — paid, awaiting fulfillment (entered into the picking/packing queue). **NOT** `"completed"` — that would mean POS-style "customer walked out with the goods," which MPP customers haven't done. Final completion happens when items are shipped or picked up.
+  - `completed_at` = purchase time (per the Shopify webhook convention; not fulfillment time).
+  - `source: "mpp"`.
+  - `mpp_payment_intent_id` = the Stripe PaymentIntent id (reverse-link).
+  - `location` = `default_shipping_location` (online-order convention; same as Shopify webhook).
+  - `customer_address` linked to the address above.
+- One **OrderItem** per quantity-unit per resolved line item, with:
+  - `status: "new"`
+  - `original_paid_price` = unit price in cents
+  - For pickup items: `to_pickup: true` + `fulfillment_location` = the customer-chosen pickup store. (The schema column is named `fulfillment_location` and is dual-meaning by row — for pickup items it's the pickup store; for ship items it's later set by routing to a ship-from warehouse. That dual meaning is Pima-internal; the agent never sees it.)
+  - For ship items: `fulfillment_location` left nil; Pima's order-routing flow assigns the warehouse + `to_ship` flag later.
+- (Optional) **OrderGiftCertificateItems** when the cart body carries `gift_certificate_items: [...]`.
+
+Downstream Pima processing — fulfillment routing, shipment, returns via orders.buckmason.com, exports — works on the materialized Order exactly as if it had come from a web checkout.
 
 ### Hard guarantees enforced by Pima
 
