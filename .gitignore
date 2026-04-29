@@ -1,5 +1,6 @@
 # Local generation artifacts (look images, product flat-lays, generated PDFs/decks, scratch shell scripts)
 test-output/
+.workspace/
 
 # Editor / OS noise
 .DS_Store
