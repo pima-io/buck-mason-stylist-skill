@@ -122,7 +122,10 @@ POST /mcp/buckmason/checkout
 Content-Type: application/json
 Authorization: Payment <SPT>             ← canonical MPP form (Bearer also accepted)
 Idempotency-Key: <uuid>                  ← reuse the same key from phase 1
+X-Agent-Identity: Claude Code            ← agent self-id, recorded on the Order's notes
 ```
+
+> **`X-Agent-Identity`** — the wrapping agent's self-identification ("Claude Code", "Cursor", etc). link-cli sends `User-Agent: node` by default, which loses the actual caller, so Pima reads `X-Agent-Identity` first and records it on `Order#notes` ("MPP order via Claude Code"). Pass via `link-cli mpp pay --header 'X-Agent-Identity: Claude Code'`. Optional but recommended — without it the order note falls back to a generic `link-cli (node)`.
 ```json
 {
   "line_items": [...],            // identical to phase 1
