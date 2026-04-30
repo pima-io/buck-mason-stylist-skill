@@ -235,18 +235,18 @@ Agents that don't recognize MPP should fall back to `POST /mcp/buckmason/cart` (
 Two affordances let an agent run against staging or soak-test against prod without moving real money:
 
 ### `Pima-Environment` response header (and manifest field)
-Every MCP/MPP response stamps `Pima-Environment: <production|sandbox>`. The same value is in `manifest.environment`. Production is the default; on `staging.pima.io` the header reads `sandbox`. Use this to refuse to charge real money when the agent thinks it's hitting prod but the response says sandbox (or vice versa).
+Every MCP/MPP response stamps `Pima-Environment: <production|sandbox>`. The same value is in `manifest.environment`. `pima.io` is production. Use this header to refuse to charge real money when the agent thinks it's hitting sandbox but the response says production (or vice versa).
 
 ```bash
-curl -sI https://staging.pima.io/mcp/buckmason/manifest | grep -i pima-environment
-# Pima-Environment: sandbox
+curl -sI https://pima.io/mcp/buckmason/manifest | grep -i pima-environment
+# Pima-Environment: production
 ```
 
 ### `?dry_run=true` query param on `/checkout`
 Skips Stripe entirely. Returns a fake `Payment-Receipt: pi_dry_run_<random>` header, sets `state: "dry_run"` in the body, sets `Pima-Dry-Run: true` response header, and does **not** materialize a Pima Order. Lets agents validate the full envelope shape (cart resolution, totals, coupon/credit application, total-mismatch guards, Authorization parsing) without authorizing a payment.
 
 ```bash
-curl -sS -i -X POST 'https://staging.pima.io/mcp/buckmason/checkout?dry_run=true' \
+curl -sS -i -X POST 'https://pima.io/mcp/buckmason/checkout?dry_run=true' \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Payment any-string-works-in-dry-run' \
   -d '{"line_items":[{"sku":"<sku>","quantity":1}],
