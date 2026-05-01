@@ -1,10 +1,11 @@
 {
-  "name": "buck-mason-stylist",
-  "namespace": "pima",
-  "version": "0.1.0",
+  "name": "buck-mason-stylist-skill",
+  "namespace": "nickmerwin",
+  "version": "0.1.1",
   "visibility": "public",
-  "description": "Personal shopping skill for Buck Mason — stock checks, wardrobe gap analysis, AI try-on lookbooks, and one-shot cart + checkout. Talks to /mcp/buckmason/* on pima.io; no company key required.",
-  "homepage": "https://github.com/buckmason/buck-mason-stylist-skill",
+  "description": "Personal shopping skill for Buck Mason — stock checks, wardrobe gap analysis, AI try-on lookbooks, and one-shot cart + checkout (browser link or fully agent-driven via MPP + stripe/link-cli). Talks to /mcp/buckmason/* on pima.io; no company key required.",
+  "homepage": "https://github.com/pima-io/buck-mason-stylist-skill",
+  "repository": "https://github.com/pima-io/buck-mason-stylist-skill",
   "license": "MIT",
   "primaryEnv": ["OPENAI_API_KEY"],
   "requires": {

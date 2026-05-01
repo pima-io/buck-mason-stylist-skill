@@ -6,8 +6,11 @@ brand voice, and store footprint. It is not intended to be generic.
 
 The goal of publishing is **discoverability inside the OpenClaw / ClawHub
 community directory** so other Buck Mason internal tools, agents, and team
-members can `clawhub install pima/buck-mason-stylist` instead of cloning the
-Pima repo.
+members can `clawhub install nickmerwin/buck-mason-stylist-skill` instead of
+cloning the Pima repo.
+
+**Live at:** <https://clawhub.ai/nickmerwin/buck-mason-stylist-skill> (v0.1.0,
+published 2026-05-01).
 
 ## Why ClawHub (and not anthropics/skills)
 
@@ -15,8 +18,9 @@ Pima repo.
 |---|---|---|
 | Audience | Multi-CLI (Claude Code + Codex + Gemini + others) | Claude-only reference / examples |
 | Listing model | Registry-backed; `clawhub` CLI installs | Submit a PR; users clone the folder |
+
 | Private/brand-specific skills allowed | **Yes — "unlisted" mode** keeps it off browse/search but installable by direct URL | No — repo is for "demonstration and educational purposes" |
-| Versioning | Built-in — published tarballs, `clawhub install pima/buck-mason-stylist@1.2.0` | Folder snapshots, no version semantics |
+| Versioning | Built-in — published tarballs, `clawhub install nickmerwin/buck-mason-stylist-skill@1.2.0` | Folder snapshots, no version semantics |
 
 ClawHub is the right home for a brand-specific skill. anthropics/skills would
 require us to genericize away the Buck Mason specifics, which defeats the
@@ -92,14 +96,17 @@ ClawHub reviewers and curious users without any onboarding.
 
 5. **Publish**:
    ```bash
-   clawhub skill publish skills/buck-mason-stylist --visibility public
+   clawhub login --token "$CLAWHUB_TOKEN" --no-browser
+   clawhub skill publish . --version 0.1.0
    ```
-   This produces a `clawhub.ai/pima/buck-mason-stylist` URL listed in
-   browse/search under the `commerce` and `lookbook` categories.
+   The `clawhub` CLI requires Node ≥ 20.12. Visibility is read from
+   `clawhub.json#visibility` (currently `public`). The published listing is at
+   <https://clawhub.ai/nickmerwin/buck-mason-stylist-skill>, indexed in browse
+   /search under the `commerce` and `lookbook` categories.
 
 6. **Install instructions** (works for anyone — no Buck Mason credentials needed):
    ```bash
-   clawhub install pima/buck-mason-stylist
+   clawhub install nickmerwin/buck-mason-stylist-skill
    export OPENAI_API_KEY=<your verified-org key>
    ```
 

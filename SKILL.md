@@ -67,7 +67,7 @@ Before reaching for the MCP, **read `https://www.buckmason.com` directly** — i
 
 This skill is built on Pima's `/mcp/*` endpoints — a single, public, agent-friendly surface that returns rich product data, per-store inventory, and one-call cart links. **Read `references/mcp-api.md` for the full contract.**
 
-The `/api/*` endpoints (documented in `docs/advanced/pima-api.md`) power **orders.buckmason.com** — Buck Mason's live Returns Management and Order Tracking portal — and cover everything the MCP doesn't: customer login, account, order history with shipment + tracking, return initiation, and card-on-file checkout. They're production-grade and current; they're "outside the MCP" only because they need a customer JWT (or an order_code for guest lookups), not because they're deprecated. Reach for them whenever the user asks about an existing order, fulfillment status, or starting a return.
+The `/api/*` endpoints (documented in `docs/advanced/pima-api.md`) power **orders.buckmason.com** — Buck Mason's live Returns Management and Order Tracking portal — and cover everything the MCP doesn't: customer login, account, order history with shipment + tracking, and return initiation. Reach for them whenever the user asks about an existing order, fulfillment status, or starting a return. **Purchasing happens through the MCP only** — either `POST /mcp/buckmason/cart` (browser permalink) or `POST /mcp/buckmason/checkout` (MPP, agent-driven). The agent does not call any `/api/*` purchase path.
 
 | What you need | Endpoint | Notes |
 |---|---|---|
@@ -82,7 +82,7 @@ The `/api/*` endpoints (documented in `docs/advanced/pima-api.md`) power **order
 | Customer login & past-order wardrobe seeding | `POST /api/verify_order_or_email` → magic link → `POST /api/login_via_token` → `GET /api/order_history` | Optional. Requires the agent to read the customer's email OR the customer to paste the link back. Use the `?order_code=` path (next row) if the user just wants one order, not their full history. |
 | **Order tracking + fulfillment status** | `GET /api/order_history?token=<jwt>` (auth) **or** `?order_code=<code>` (guest) | Returns shipments[] with `status`, `tracking_code`, `tracking_url`, `shipped_at`, `estimated_delivery_at`. Same endpoint that powers orders.buckmason.com. |
 | **Initiate / manage a return** | `POST /api/customer_returns` + the return_reasons / shipping_rates helpers in `docs/advanced/pima-api.md` | Powers the Returns Management portal at orders.buckmason.com. |
-| Charge card on file | `POST /api/purchase` | Auth required + explicit "charge it" confirmation in the same turn. |
+| Fully agent-driven checkout (no browser) | `POST /mcp/buckmason/checkout` (MPP) | HTTP 402 challenge → agent mints a Stripe SPT via `stripe/link-cli` (push-approved by the customer in their Link app) → re-POST with `Authorization: Payment <SPT>`. Read `references/mpp.md`. |
 
 **Gender awareness.** Always pass `gender` (`m`/`w`/`u`) on every catalog/recommend call once you've inferred it from the customer's profile. If the customer doesn't specify, ask once and save it to `profile.md`. The default profile template now includes a `gender:` field.
 
@@ -182,9 +182,8 @@ Before posting to `/v1/images/edits`, assemble these in this exact order:
 
    Don't substitute sizes for pickup convenience. If the customer's exact size is out at the chosen store but a different size is in, surface and ask — never substitute silently.
 2. If the customer is logged in and wants to use a coupon or store credit before they hit Shopify, use `POST /api/update_cart` + `POST /api/add_coupon_or_customer_credit` (Pima-side cart) instead, then surface the resulting cart's checkout URL.
-3. **Do not call `POST /api/purchase` from the agent unless the customer explicitly says "charge my card on file"** *and* the request is in a session where the customer is authenticated and has a saved card (`order[use_existing_card]: true`). Even then, confirm the total in plain English first and require an unambiguous "yes, charge it" before submitting.
 
-4. **Fully agent-driven checkout (MPP path).** When the customer wants the agent to handle the entire transaction — line items, shipping, payment, confirmation — without bouncing to a browser, use the **[Merchant Payments Protocol](https://mpp.dev)** endpoint at `POST https://pima.io/mcp/buckmason/checkout`. Required when the surface has no browser (voice agents, concierge flows, headless installations). The protocol uses HTTP 402 + `WWW-Authenticate: Payment` to challenge the agent for a **Stripe Shared Payment Token (SPT)**, which the agent obtains via **[stripe/link-cli](https://github.com/stripe/link-cli)** — the customer push-approves the spend in their Link wallet on their phone, and link-cli returns the SPT. The push-approval IS the consent. Always read the `total` back to the customer before kicking off `link-cli spend-request create`; always echo `acknowledged_total_cents` on the second POST to catch hallucinated totals. Coupons (`coupon: "..."`) and customer credits (`customer_credit_codes: [...]`) work as bearer codes — same model as POS. The full lifecycle, two-phase request shapes, guardrails (idempotency, total mismatch, card decline), coupon/credit envelope, and worked transcript are in **`references/mpp.md`** — read it before invoking the endpoint.
+3. **Fully agent-driven checkout (MPP path).** When the customer wants the agent to handle the entire transaction — line items, shipping, payment, confirmation — without bouncing to a browser, use the **[Merchant Payments Protocol](https://mpp.dev)** endpoint at `POST https://pima.io/mcp/buckmason/checkout`. Required when the surface has no browser (voice agents, concierge flows, headless installations). The protocol uses HTTP 402 + `WWW-Authenticate: Payment` to challenge the agent for a **Stripe Shared Payment Token (SPT)**, which the agent obtains via **[stripe/link-cli](https://github.com/stripe/link-cli)** — the customer push-approves the spend in their Link wallet on their phone, and link-cli returns the SPT. The push-approval IS the consent. Always read the `total` back to the customer before kicking off `link-cli spend-request create`; always echo `acknowledged_total_cents` on the second POST to catch hallucinated totals. Coupons (`coupon: "..."`) and customer credits (`customer_credit_codes: [...]`) work as bearer codes — same model as POS. The full lifecycle, two-phase request shapes, guardrails (idempotency, total mismatch, card decline), coupon/credit envelope, and worked transcript are in **`references/mpp.md`** — read it before invoking the endpoint.
 
 ### 5. Order tracking + returns — "where's my order" / "I want to return this"
 
@@ -221,9 +220,9 @@ Don't fabricate tracking numbers or delivery dates from training data. If `/api/
 
 A shopping agent has full read/write access to a checkout flow. Treat any tool call that moves money as a destructive action that needs explicit confirmation in the same turn:
 
-- **Default**: produce a checkout URL for the customer to complete in their browser.
-- **On-file card charges**: only after the customer says "charge it" / "go ahead and pay" in the same conversation, with the total restated.
-- **Never** save a Stripe token, full card number, or CVV to any file. Pass tokens directly from the customer's input to `POST /api/purchase` and discard.
+- **Default**: produce a Shopify cart link via `POST /mcp/buckmason/cart` for the customer to complete in their browser.
+- **Agent-driven (MPP)**: only after the customer has explicitly opted into agent-driven payment, with the total restated in plain English in the same turn. The Stripe Shared Payment Token (minted by `stripe/link-cli` via the customer's push-approval in their Link app) IS the consent. Always echo `acknowledged_total_cents` on phase-2 to catch hallucinated totals.
+- **Never** save a Stripe SPT, full card number, or CVV to any file. SPTs are one-time-use and short-lived; if you need to retry, mint a fresh one. The agent never asks the customer for raw card data — that flow does not exist in this skill.
 - **Coupon codes**: apply only if the customer named the code or it's already saved as customer credit. Don't go hunting for coupons online — that's a different skill.
 
 ## Personalization signals
@@ -257,7 +256,7 @@ When choosing or recommending items, weight by (in this order):
 
 - `SKILL.md` — this file.
 - `references/mcp-api.md` — **primary** API reference: Pima's `/mcp/*` endpoints.
-- `docs/advanced/pima-api.md` — `/api/*` reference (login, account, **order history with shipment + tracking**, **return initiation**, card-on-file checkout). Powers orders.buckmason.com (Returns Management and Order Tracking portal). Used by workflow #5.
+- `docs/advanced/pima-api.md` — `/api/*` reference (login, account, **order history with shipment + tracking**, **return initiation**). Powers orders.buckmason.com (Returns Management and Order Tracking portal). Used by workflow #5. **Not used for purchasing** — purchases go through `POST /mcp/buckmason/cart` (browser) or `POST /mcp/buckmason/checkout` (MPP).
 - `references/image-generation.md` — OpenAI image API prompt cookbook for try-on + lookbook.
 - `references/seasons.md` — season + region + heat-type mapping for outfit logic.
 - `references/style-reasoning.md` — the *why* engine: climate matrix, formality scale, classic-vs-trend filter, rationale format.

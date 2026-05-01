@@ -8,8 +8,8 @@ A purpose-built, agent-friendly surface that wraps the same Pima data exposed un
 
 ## Common conventions
 
-- **Base URL**: `https://pima.io` (the Pima MCP host). For Buck Mason all paths are `https://pima.io/mcp/buckmason/...`.
-- **Tenant selection**: every path is prefixed with `/mcp/<company_slug>/...`. For Buck Mason, the slug is `buckmason`. Slugs are derived from the company name via `name.parameterize` (so "Buck Mason" → `buckmason`).
+- **Base URL — `https://pima.io`** is the canonical MCP host for every endpoint in this document. There is no fallback domain, no `MCP_BASE_URL` env var, no per-environment switch. Every concrete URL below is a Buck Mason example rooted at `https://pima.io/mcp/buckmason/...` — for any other tenant, substitute the slug after `/mcp/`. The brand customer host (`https://www.buckmason.com`) is **not** an MCP base; it serves the storefront and the `/api/*` flows documented in `docs/advanced/pima-api.md`, not `/mcp/*`.
+- **Tenant selection**: every path is prefixed with `/mcp/<company_slug>/...` on the `pima.io` host. For Buck Mason, the slug is `buckmason`, so all calls land at `https://pima.io/mcp/buckmason/...`. Slugs are derived from the company name via `name.parameterize` (so "Buck Mason" → `buckmason`).
 - **Auth**: none. All endpoints are public — no key, header, or cookie required.
 - **Money**: every endpoint returns both `*_cents` (integer) and a pre-formatted string (`"$98.00"`).
 - **Gender**: pass `?gender=m` (or `male`/`men`/`mens`) — also accepts `w` and `u` (unisex). Omit for "any gender" results.
@@ -197,6 +197,8 @@ When `budget` is set, the first product in each slot's `products` array is the o
 
 Stateless. Resolves items, returns a Shopify cart permalink the customer opens in their browser to checkout. No JWT, no Pima session, no card handling.
 
+> **Two purchase paths.** This endpoint produces a *checkout link* — the customer reviews and pays in their own browser. For **fully agent-driven** transactions (voice agents, headless surfaces, concierge flows) where there is no browser, use the **Merchant Payments Protocol** flow at `POST /mcp/<company_slug>/checkout` instead. That endpoint replies `HTTP 402 Payment Required` with a `WWW-Authenticate: Payment` challenge; the agent mints a Stripe Shared Payment Token (SPT) via [`stripe/link-cli`](https://github.com/stripe/link-cli) — push-approved by the customer in their Link app — and re-POSTs with `Authorization: Payment <SPT>` to clear the challenge. The push-approval IS the consent. Full lifecycle, two-phase request shapes, idempotency, total-mismatch handling, coupon/credit envelope, and a worked transcript in `references/mpp.md`. Pick the cart endpoint by default; pick MPP only when the customer has explicitly opted into agent-driven payment.
+
 Body (JSON or form-encoded):
 
 ```json
@@ -252,7 +254,27 @@ When `pickup_location_slug` or `pickup_location_id` is present:
 
 **Implementation note.** The pickup contract is a planned extension to `/mcp/buckmason/cart` — the slug resolution, stock check, and `attributes[Pickup-Location]=` URL-encoding are not yet live in Pima as of v0.1.0 of this skill. Until then, the agent should fall back to building a ship-default cart and verbally telling the customer to choose pickup at checkout. Track Pima implementation: search the Pima repo for `pickup_location_slug`.
 
-For card-on-file checkouts (auth-required), continue to use `POST /api/purchase` after building a Pima cart via `POST /api/update_cart`. `POST /mcp/cart` is for the common, safer pattern of handing the user a checkout link.
+For fully agent-driven purchases (no browser), use `POST /mcp/<company_slug>/checkout` (the MPP endpoint described below) — the agent mints a Stripe Shared Payment Token via `stripe/link-cli` and the customer push-approves the spend in their Link app.
+
+## `POST /mcp/<company_slug>/checkout` — MPP (fully agent-driven)
+
+The Merchant Payments Protocol endpoint. Same body as `/cart`, but the response is `402 Payment Required` and the agent must clear the challenge with a Stripe SPT minted via `stripe/link-cli`. Use when the agent is processing the order on the customer's behalf, with the customer push-approving the spend in their Link app instead of opening a browser.
+
+The full contract — phase-1 challenge, phase-2 charge, idempotency, total-mismatch + card-decline handling, per-line-item pickup, coupon/credit bearer codes, error matrix, and a worked transcript — lives in **`references/mpp.md`**. Read it before invoking.
+
+Quick summary:
+
+```
+POST /mcp/buckmason/checkout                       — phase 1 (challenge)
+   ↓ 402 Payment Required, WWW-Authenticate: Payment
+   ↓ agent runs `link-cli spend-request create --request-approval`
+   ↓ customer push-approves in Link app, link-cli returns SPT
+POST /mcp/buckmason/checkout                       — phase 2 (charge)
+   Authorization: Payment <SPT>
+   Idempotency-Key: <uuid>                         — same key as phase 1
+```
+
+**Pick this over `/cart`** only when the surface has no browser, the customer has explicitly opted in, and the agent has access to `link-cli`. Default to `/cart`.
 
 ## Error responses
 

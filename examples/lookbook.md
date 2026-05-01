@@ -178,30 +178,36 @@ Cart for Look 2:
 Checkout (in your browser): https://www.buckmason.com/cart/9999:1,9998:1
 ```
 
-## 6. Customer says "yes, charge my card on file"
+## 6. Customer says "just buy it for me, no browser"
 
-Only proceed if:
-1. Customer is authenticated (JWT belongs to a registered customer, not a guest).
-2. They have a saved card (`account.stripe_customer.default_source` exists).
-3. They've explicitly authorized in the same turn ("charge it" / "go ahead and pay").
+Use the **MPP** flow (Merchant Payments Protocol) at `POST /mcp/buckmason/checkout`. The agent fetches a one-time **Stripe Shared Payment Token (SPT)** from the customer's Link wallet via [`stripe/link-cli`](https://github.com/stripe/link-cli) — the customer push-approves the spend on their phone, and that approval IS the consent. Full lifecycle in `references/mpp.md`.
 
-Restate the total in plain English, then:
+Quick shape (read `references/mpp.md` for the complete contract):
 
 ```
-POST https://www.buckmason.com/api/purchase
-Authorization: Bearer <jwt>
-  order[use_existing_card]=true
-  order[shipping_rate_code]=standard
+# Phase 1 — challenge
+POST https://pima.io/mcp/buckmason/checkout
+Idempotency-Key: <uuid>
+{ "line_items": [...], "buyer": {...}, "fulfillment_address": {...} }
+
+→ HTTP 402 Payment Required
+  WWW-Authenticate: Payment id="…", method="stripe", request="<base64url>"
+
+# Agent reads the total back to the customer in plain English.
+# Customer says "yes, buy it." Agent runs:
+link-cli spend-request create --request-approval --amount <total_cents> ...
+
+# Customer push-approves in Link app. link-cli returns the SPT.
+
+# Phase 2 — charge (same body, same Idempotency-Key)
+POST https://pima.io/mcp/buckmason/checkout
+Authorization: Payment <SPT>
+Idempotency-Key: <uuid>
+{ ...same body..., "acknowledged_total_cents": <total_cents> }
+
+→ 200 OK { "order_code": "ORD-AB12CD", "status": "processing", ... }
 ```
 
-Response on success:
-```json
-{
-  "id": 9921, "code": "ORD-AB12CD", "status": "processing",
-  "completed_at": "2026-04-24T18:30:00Z", "total": 24634, ...
-}
-```
+Confirm to the customer: order code, total charged, expected delivery from the order-tracking response (later visible via `GET /api/order_history?order_code=...`).
 
-Confirm to the customer: order code, total charged, expected delivery from `estimated_delivery_date` (later visible via `GET /api/order_history`).
-
-If the customer is a guest or there's no saved card, **do not** ask for card details — produce the Shopify checkout URL instead and let them complete it in their browser.
+If the agent doesn't have `link-cli` set up or the customer hasn't opted into agent-driven payment, **do not** ask for card details — produce the Shopify cart link from `POST /mcp/buckmason/cart` and let them complete it in their browser.

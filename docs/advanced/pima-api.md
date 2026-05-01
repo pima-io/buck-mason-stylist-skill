@@ -1,6 +1,6 @@
 # Pima API reference (customer-facing endpoints)
 
-> For shopping flows, **start with `references/mcp-api.md`** (the `/mcp/*` endpoints). They give you rich product data, per-store stock, and one-call cart links without any of the auth/session juggling below. Use this `/api/*` reference for the customer-facing flows powering **orders.buckmason.com** (the Returns Management and Order Tracking portal): order history with shipment + tracking, return creation, exchange options, and card-on-file checkout.
+> For shopping flows, **start with `references/mcp-api.md`** (the `/mcp/*` endpoints). They give you rich product data, per-store stock, and both purchase paths (cart-link via `POST /mcp/buckmason/cart` + fully agent-driven via `POST /mcp/buckmason/checkout` MPP) without any of the auth/session juggling below. Use this `/api/*` reference for the customer-facing flows powering **orders.buckmason.com** (the Returns Management and Order Tracking portal): order history with shipment + tracking, return creation, and exchange options.
 
 Base URL: **`https://pima.io/api`**. Same host as the MCP endpoints (`https://pima.io/mcp/...`); different prefix.
 
@@ -22,7 +22,7 @@ On top of that, individual endpoints layer one of:
 |---|---|---|
 | **Guest** (key only) | `?key=<pima_company_key>` | `POST /api/verify_order_or_email`, public catalog endpoints |
 | **Guest order code** | `?key=<pima_company_key>&order_code=<code>` (the order number from the confirmation email) | `GET /api/order_history`, return creation, label purchase — when the customer is not logged in |
-| **Customer JWT** | `Authorization: <jwt>` header (raw token, no `Bearer` prefix — the RMS sets it as `api.defaults.headers.common['Authorization'] = jwt`) | All the above + `/api/account`, `/api/address`, `/api/purchase` |
+| **Customer JWT** | `Authorization: <jwt>` header (raw token, no `Bearer` prefix — the RMS sets it as `api.defaults.headers.common['Authorization'] = jwt`) | All the above + `/api/account`, `/api/address` |
 | **Inventory API key** | `?token=<inventory_api_key>` query param | `GET /api/inventory`, `GET /api/customers` (CSV streaming, partner-only) |
 
 The JWT comes from `POST /api/login_via_token` (magic-link flow) or `POST /api/login` / `POST /api/register`. Persist it for the session.
@@ -198,19 +198,10 @@ Same shape — accepts either a coupon code or a customer-credit code. Use this 
 
 ## Checkout
 
-### `POST /api/purchase`
+Purchasing is handled by the MCP, not `/api/*`. Use one of:
 
-Body (form-urlencoded):
-- `order[stripe_token]` — required unless `order[use_existing_card]=true` (auth required for that path)
-- `order[shipping_rate_code]` — optional shipping selection
-- `order[new_customer_address][email]`, `[name]`, `[address_line1]`, `[address_city]`, `[address_state]`, `[address_zip]`, `[address_country]`, `[address_phone]`
-- `order[items][N][...]` — optional final cart sync before charging
-- `order[campaign_params]` — optional UTM/marketing data
-
-Success: completed `Order` JSON (status: `processing`, `completed_at` set).
-Failure: `{ "errors": { ... }, "order": {...}, "to_capture_amount": 5000 }`.
-
-**Recommended pattern for agent-driven shopping:** instead of calling `/api/purchase` directly, build the cart via `/api/update_cart` then surface a Shopify checkout URL (`https://www.buckmason.com/cart/<variant_id>:1,<variant_id>:1`) for the customer to complete in their browser. Only call `/api/purchase` if the customer has explicitly authorized a card-on-file charge in the same turn.
+- `POST /mcp/buckmason/cart` — stateless; returns a Shopify cart permalink the customer pays in their browser. See `references/mcp-api.md`.
+- `POST /mcp/buckmason/checkout` — Merchant Payments Protocol; HTTP 402 challenge cleared with a Stripe Shared Payment Token minted via [`stripe/link-cli`](https://github.com/stripe/link-cli) (push-approved by the customer in their Link app). See `references/mpp.md`.
 
 ## Orders + Returns + Order Tracking
 
@@ -317,7 +308,6 @@ All money fields are **integer cents**. Divide by 100 for display.
 | `POST /api/login` | bad creds | `{ "error": "incorrect" }` |
 | `POST /api/register` | missing fields | `{ "errors": "Missing email or password" }` |
 | `POST /api/update_cart` | unknown product | `{ "errors": { "inventory": "Sorry, we couldn't find <code>" } }` |
-| `POST /api/purchase` | empty cart | `{ "errors": { "inventory": "Your cart is empty." } }` |
 | `GET /api/inventory` | missing/wrong token | 403 plain text "Unauthorized" |
 | `GET /api/products/:id/sold_with` | not found | `{}` (empty object — not an error) |
 
