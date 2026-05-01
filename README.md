@@ -11,11 +11,17 @@ A personal-shopping skill for [Buck Mason](https://www.buckmason.com), built for
 
 ## Required setup
 
-One environment variable:
+### `OPENAI_API_KEY` (only for the AI try-on lookbook workflow)
 
 ```bash
-export OPENAI_API_KEY=<your key>   # verified org for gpt-image-2; gpt-image-1 is a safe fallback
+export OPENAI_API_KEY=sk-...
 ```
+
+The skill posts to `https://api.openai.com/v1/images/edits` with `model: "gpt-image-2"` to generate editorial try-on images. **The OpenAI organization tied to the key must be verified for `gpt-image-2`** (see <https://help.openai.com/en/articles/10910291>). Get a key at <https://platform.openai.com/api-keys>.
+
+The other workflows — stock check, recommend, cart, checkout, order tracking — do **not** require an OpenAI key. They only call the pima.io MCP.
+
+### Profile
 
 One profile file in your agent's workspace (copy from `templates/profile.example.md`):
 

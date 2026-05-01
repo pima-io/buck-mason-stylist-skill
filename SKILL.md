@@ -1,7 +1,7 @@
 ---
 name: buck-mason-stylist
 description: Personal shopping skill for Buck Mason. Stock-checks (online + nearby store), wardrobe gap analysis, season- and event-aware outfit suggestions, AI try-on lookbooks, and one-shot cart + checkout. Customer brings sizes once; the agent reuses them across requests.
-version: 0.1.0
+version: 0.1.4
 license: MIT
 authors:
   - Buck Mason / Pima
@@ -12,10 +12,33 @@ compatibility:
 metadata:
   openclaw:
     requires:
-      env: [OPENAI_API_KEY]
+      env:
+        - name: OPENAI_API_KEY
+          required: true
+          purpose: |
+            Used **only** for the AI try-on lookbook flow (workflow #3 of this
+            skill). The skill calls OpenAI's `/v1/images/edits` endpoint with
+            `model: "gpt-image-2"` to generate editorial try-on images of the
+            customer wearing recommended outfits. No text-completion calls,
+            no chat calls, no other endpoints. Stock checks, recommendations,
+            cart/checkout, and order tracking do NOT require this key.
+          format: "OpenAI API secret key, prefix `sk-...`"
+          obtain_url: "https://platform.openai.com/api-keys"
+          notes: |
+            The OpenAI organization tied to this key must be **verified for
+            `gpt-image-2`** access. Unverified orgs receive 403 from the
+            image-edits endpoint; the skill will surface that as an
+            actionable error rather than silently downgrading to
+            `gpt-image-1` (see `references/image-generation.md`). See
+            https://help.openai.com/en/articles/10910291 for verification.
+          how_to_set: "export OPENAI_API_KEY=sk-... in the shell that runs the agent, or set it in the agent host's secrets manager."
       binaries: [curl, jq]
       python: [python-pptx, Pillow]
-      optional_binaries: [magick, wkhtmltopdf]
+      optional_binaries: [magick]
+      optional_clis:
+        - name: stripe/link-cli
+          purpose: "Required only for the fully-agent-driven MPP checkout path (workflow #4 step 3). Mints a one-time Stripe Shared Payment Token from the customer's Link wallet."
+          install: "npm i -g @stripe/link-cli"
     categories: [commerce, image-generation, lookbook]
     tags: [buck-mason, pima, stylist, shopping, stock, mcp]
 ---
@@ -23,6 +46,18 @@ metadata:
 # Buck Mason personal stylist
 
 You are acting as a personal shopper for Buck Mason. The customer has loaded this skill into their agent (Claude, Codex, ChatGPT, etc.) so they can shop without re-typing their sizes, addresses, or stylistic preferences each time.
+
+## Environment
+
+This skill needs **one** environment variable, and only for one workflow:
+
+| Var | Required for | How to set |
+|---|---|---|
+| `OPENAI_API_KEY` | Workflow #3 (AI try-on lookbooks) — the skill posts to `https://api.openai.com/v1/images/edits` with `model: "gpt-image-2"`. | `export OPENAI_API_KEY=sk-...` in the shell or secret manager that runs the agent. Get a key at <https://platform.openai.com/api-keys>. |
+
+**`gpt-image-2` access is gated.** The OpenAI organization tied to the key must be **verified for `gpt-image-2`** (see <https://help.openai.com/en/articles/10910291>). Unverified orgs get HTTP 403 from `/v1/images/edits` — the skill surfaces that as an actionable error rather than falling back to `gpt-image-1` (identity drift, weaker garment-color fidelity). The other workflows (stock check, recommend, cart, checkout, order tracking) do **not** require an OpenAI key — they only call the pima.io MCP.
+
+If `OPENAI_API_KEY` is unset and the user asks for a try-on image, tell them how to set it (the table above) and offer the text-only / flat-lay lookbook fallback in the meantime — don't block the rest of the flow.
 
 ## When to use this skill
 
@@ -134,7 +169,7 @@ Before posting to `/v1/images/edits`, assemble these in this exact order:
 5. **Setting + composition** from `GET /mcp/buckmason/lookbook/settings?occasion=…&season=…&region=…` — pick one entry from the returned `looks[]`, or roll your own only if the curated list doesn't fit.
 3. For each look in the lookbook (typically 3–5):
    - Build an OpenAI image-edit call with: the reference photo as the subject, the product flat-lays as `image[]` references, and a prompt describing the setting (from event context — "golden-hour vineyard, Sonoma County, May, candid 35mm").
-   - Use `model: "gpt-image-1"`, `quality: "high"`, `size: "1024x1536"` (portrait) by default.
+   - Use `model: "gpt-image-2"`, `quality: "high"`, `size: "1024x1536"` (portrait) by default. The skill standardizes on `gpt-image-2` for identity + garment fidelity; do not silently downgrade to `gpt-image-1`.
    - Save each generated image with a sortable filename (`lookbook/<date>-<event>-look-N.png`).
 4. **Pick an output format.** Ask the customer once, default to PPT if they don't specify:
 

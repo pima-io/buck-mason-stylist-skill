@@ -60,7 +60,7 @@ for look_num, look in enumerate(LOOKS, start=1):
         composition=COMPOSITIONS[look_num - 1],
     )
     result = client.images.edit(
-        model="gpt-image-1",
+        model="gpt-image-2",
         image=[reference] + product_images,
         prompt=prompt, size="1024x1536", quality="high", n=1,
     )

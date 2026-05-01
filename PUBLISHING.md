@@ -61,7 +61,7 @@ ClawHub reviewers can approve permissions without back-and-forth.
      "homepage": "https://github.com/buckmason/buck-mason-stylist-skill",
      "primaryEnv": ["OPENAI_API_KEY"],
      "requires": {
-       "binaries": ["magick", "jq", "curl", "python3", "wkhtmltopdf"],
+       "binaries": ["magick", "jq", "curl", "python3"],
        "python": ["python-pptx", "Pillow"]
      },
      "categories": ["commerce", "image-generation", "lookbook"],

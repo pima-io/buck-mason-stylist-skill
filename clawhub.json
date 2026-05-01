@@ -1,17 +1,31 @@
 {
   "name": "buck-mason-stylist-skill",
   "namespace": "nickmerwin",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "visibility": "public",
-  "description": "Personal shopping skill for Buck Mason — stock checks, wardrobe gap analysis, AI try-on lookbooks, and one-shot cart + checkout (browser link or fully agent-driven via MPP + stripe/link-cli). Talks to the pima.io MCP at /mcp/buckmason/*.",
+  "description": "Personal shopping skill for Buck Mason — stock checks, wardrobe gap analysis, AI try-on lookbooks (gpt-image-2), and one-shot cart + checkout (browser link or fully agent-driven via MPP + stripe/link-cli). Talks to the pima.io MCP at /mcp/buckmason/*.",
   "homepage": "https://github.com/pima-io/buck-mason-stylist-skill",
   "repository": "https://github.com/pima-io/buck-mason-stylist-skill",
   "license": "MIT",
   "primaryEnv": ["OPENAI_API_KEY"],
+  "env": [
+    {
+      "name": "OPENAI_API_KEY",
+      "required": true,
+      "purpose": "Used by workflow #3 (AI try-on lookbooks) to call OpenAI /v1/images/edits with model gpt-image-2. Other workflows do not require this key.",
+      "format": "OpenAI API secret key (sk-...)",
+      "obtain_url": "https://platform.openai.com/api-keys",
+      "verification_required": "gpt-image-2 — see https://help.openai.com/en/articles/10910291",
+      "how_to_set": "export OPENAI_API_KEY=sk-..."
+    }
+  ],
   "requires": {
     "binaries": ["curl", "jq"],
-    "optional_binaries": ["magick", "wkhtmltopdf"],
-    "python": ["python-pptx", "Pillow"]
+    "optional_binaries": ["magick"],
+    "python": ["python-pptx", "Pillow"],
+    "optional_clis": [
+      {"name": "stripe/link-cli", "install": "npm i -g @stripe/link-cli", "purpose": "MPP fully-agent-driven checkout"}
+    ]
   },
   "categories": ["commerce", "image-generation", "lookbook"],
   "tags": ["buck-mason", "pima", "stylist", "shopping", "stock", "mcp"],
@@ -20,7 +34,7 @@
       {"host": "pima.io", "purpose": "MCP catalog/stock/locations/cart"},
       {"host": "www.buckmason.com", "purpose": "MCP catalog/stock/locations/cart (public alias)"},
       {"host": "cdn.shopify.com", "purpose": "Product imagery for lookbook generation"},
-      {"host": "api.openai.com", "purpose": "Image generation (gpt-image-1 / gpt-image-2)"}
+      {"host": "api.openai.com", "purpose": "Image generation (gpt-image-2)"}
     ],
     "filesystem": [
       {"path": "<workspace>/profile.md", "mode": "read"},

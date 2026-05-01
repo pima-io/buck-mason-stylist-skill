@@ -27,7 +27,7 @@ The pipeline takes **two structured fact sheets** plus a setting, and assembles 
 
 ### Identity anchor photos — selection rules
 
-**Image input order matters.** Send garments FIRST, identity references AFTER. Reasoning: `gpt-image-2` (and to a lesser extent `gpt-image-1`) treats the most photographically-complete reference image as "the answer" and tends to copy its outfit, backdrop, and pose verbatim. Garments-first reverses that bias.
+**Image input order matters.** Send garments FIRST, identity references AFTER. Reasoning: `gpt-image-2` treats the most photographically-complete reference image as "the answer" and tends to copy its outfit, backdrop, and pose verbatim. Garments-first reverses that bias.
 
 **Never include fully-dressed reference photos for try-on lookbooks.** This was learned the hard way: a clean LA street photo (subject in olive overshirt + white henley + black jeans against a brick wall, golden-hour light) was passed as identity anchor #1 in a 7-reference call. `gpt-image-2` produced 5 lookbook images that ALL copied that outfit, that backdrop, that lighting — completely ignoring the actual product flat-lays for shirt and pant, and the chateau / vineyard / dinner setting prompts. Use **only** these reference types:
 
@@ -140,7 +140,7 @@ result = client.images.edit(
 ```
 
 Notes:
-- `model`: `gpt-image-2` (current default, snapshot `gpt-image-2-2026-04-21`). Falls back to `gpt-image-1` if your tier doesn't have access.
+- `model`: **`gpt-image-2`** (snapshot `gpt-image-2-2026-04-21`) — required. The skill standardizes on `gpt-image-2`; do not fall back to `gpt-image-1` (identity drift, weaker garment-color fidelity, lower setting adherence). If the calling org isn't verified for `gpt-image-2`, surface that as an actionable error to the user rather than silently downgrading.
 - `size`: `1024x1536` for portrait try-ons, `1024x1024` for square lookbook tiles, `1536x1024` for landscape settings. `gpt-image-2` supports flexible sizes.
 - `quality`: use `high` for finals, `medium` for iteration drafts.
 - `n=1` per call — call repeatedly with varied prompts for a lookbook rather than asking for n>1 in one call (each image gets a distinct setting/pose).
@@ -243,7 +243,7 @@ After each generation, eyeball:
 
 1. **Identity drift** — does the face still resemble the reference? If not, increase the weight of the reference by reordering it first and adding "exact face from first image" emphasis.
 2. **Garment fidelity** — color/silhouette match the product image? If not, name the color/material more concretely in the outfit line.
-3. **Logo invention** — gpt-image-1 sometimes hallucinates wordmarks. Add "no text, no brand marks, no logos" in the style line.
+3. **Logo invention** — `gpt-image-2` occasionally hallucinates wordmarks on tees/jackets. Add "no text, no brand marks, no logos" in the style line.
 4. **Anatomy** — extra fingers/limbs are still possible. If a generation has obvious flaws, regenerate once with the same prompt; don't iterate the prompt.
 
 If 3 regenerations still fail on a look, fall back to **flat-lay** for that look and note it in the lookbook.
