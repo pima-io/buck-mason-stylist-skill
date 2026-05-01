@@ -37,20 +37,17 @@ purpose.
 - The whole `references/` package — references real BM SKUs and category names
 
 ### What's required to install
-- **No company key** — the MCP is path-tenanted (`/mcp/buckmason/...`), so any
-  agent can hit Buck Mason's public catalog/stock/locations endpoints without
-  credentials. Tenant resolution is via `Company#public_slug`
-  (`name.parameterize`).
+- The pima.io MCP is path-tenanted (`/mcp/buckmason/...`); the skill calls it
+  directly with no extra setup.
 - The user's own `OPENAI_API_KEY` for image generation (org-verified for
   `gpt-image-2`). This is the only required environment variable.
 - macOS or Linux with `magick` (ImageMagick 7), `jq`, `curl`, `python3` +
-  `python-pptx`, and optionally `wkhtmltopdf` for PDF output.
+  `python-pptx`, and `Pillow`. `stripe/link-cli` is required only for the
+  fully-agent-driven MPP checkout path.
 
 These dependencies must be documented in the SKILL.md frontmatter
 (`metadata.openclaw.requires`) AND in a top-level "What you need" section so
-ClawHub reviewers can approve permissions without back-and-forth. Because the
-skill needs zero Buck Mason credentials, it can be installed and explored by
-ClawHub reviewers and curious users without any onboarding.
+ClawHub reviewers can approve permissions without back-and-forth.
 
 ## Publish flow
 
@@ -77,9 +74,9 @@ ClawHub reviewers and curious users without any onboarding.
    ---
    name: buck-mason-stylist
    description: Buck Mason shopping stylist — checks online + nearby-store stock,
-     suggests outfits, generates editorial try-on lookbooks (PNG + PPT/PDF),
-     and builds Shopify cart links. Buck Mason–specific (talks to
-     /mcp/buckmason/* on pima.io); no company key required.
+     suggests outfits, generates editorial try-on lookbooks (PNG + PPT/HTML),
+     and builds Shopify cart links or runs fully-agent-driven MPP checkouts.
+     Talks to the pima.io MCP at /mcp/buckmason/*.
    compatibility:
      mcp_servers: [pima-mcp]
      binaries: [magick, jq, curl, python3]

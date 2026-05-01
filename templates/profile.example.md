@@ -7,7 +7,7 @@ Copy this file into your agent's persistent workspace as `profile.md` and fill i
 - name: Jane Doe
 - email: jane@example.com
 - gender: m                         # m / w / u — used for catalog filters and recommend
-- pima_company_key: pkLOMQfU1qM    # Buck Mason public brand key — required on every /api/* call (order tracking, returns, checkout). Not needed for /mcp/* (which is path-tenanted).
+- pima_api_key: pkLOMQfU1qM        # Buck Mason public Pima API key — required on every /api/* call (order tracking, returns). Not needed for /mcp/* (which is path-tenanted).
 - pima_account_linked: false       # set true if you've logged in via /api/login_via_token (only needed for account/checkout/return flows)
 - jwt: null                         # don't fill manually; agent stores after login_via_token returns
 

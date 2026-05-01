@@ -8,10 +8,10 @@ All endpoints return JSON unless noted. Successful responses are 200 OK; errors 
 
 ## Auth
 
-Every `/api/*` request requires the **public company key** as a query param:
+Every `/api/*` request requires the **public Pima API key** as a query param:
 
 ```
-?key=<pima_company_key>
+?key=<pima_api_key>
 ```
 
 For Buck Mason the value is **`pkLOMQfU1qM`**. This is the same `REACT_APP_PIMA_KEY` shipped in the orders.buckmason.com React bundle to every customer's browser — it identifies the brand, not the user, and is brand-public by design (rotating it is a brand-wide ops action, not a per-customer secret). Bake it into the HTTP client's defaults so every call gets it (the RMS frontend does exactly this — see `pima-api.js` in the buckmason-rms repo).
@@ -20,8 +20,8 @@ On top of that, individual endpoints layer one of:
 
 | Mode | How | Used by |
 |---|---|---|
-| **Guest** (key only) | `?key=<pima_company_key>` | `POST /api/verify_order_or_email`, public catalog endpoints |
-| **Guest order code** | `?key=<pima_company_key>&order_code=<code>` (the order number from the confirmation email) | `GET /api/order_history`, return creation, label purchase — when the customer is not logged in |
+| **Guest** (key only) | `?key=<pima_api_key>` | `POST /api/verify_order_or_email`, public catalog endpoints |
+| **Guest order code** | `?key=<pima_api_key>&order_code=<code>` (the order number from the confirmation email) | `GET /api/order_history`, return creation, label purchase — when the customer is not logged in |
 | **Customer JWT** | `Authorization: <jwt>` header (raw token, no `Bearer` prefix — the RMS sets it as `api.defaults.headers.common['Authorization'] = jwt`) | All the above + `/api/account`, `/api/address` |
 | **Inventory API key** | `?token=<inventory_api_key>` query param | `GET /api/inventory`, `GET /api/customers` (CSV streaming, partner-only) |
 
@@ -219,7 +219,7 @@ Customer's last year of orders, with shipment + tracking + estimated delivery da
 - Guest with order code: `?order_code=<code>` (the order number from the confirmation email)
 - Both: header takes precedence
 
-Always include `?key=<pima_company_key>`. `?page=N` for pagination.
+Always include `?key=<pima_api_key>`. `?page=N` for pagination.
 
 ```json
 [

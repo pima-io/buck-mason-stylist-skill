@@ -1,6 +1,6 @@
 # Buck Mason Stylist Skill
 
-A personal-shopping skill for [Buck Mason](https://www.buckmason.com), built for Claude Code, Codex, ChatGPT custom GPTs, and any agent that loads `SKILL.md`–style skills. Talks to Buck Mason's public, path-tenanted MCP server (`pima.io/mcp/buckmason/*`) — no company key required.
+A personal-shopping skill for [Buck Mason](https://www.buckmason.com), built for Claude Code, Codex, ChatGPT custom GPTs, and any agent that loads `SKILL.md`–style skills. Talks to the pima.io MCP at `pima.io/mcp/buckmason/*`.
 
 ## What it does
 
