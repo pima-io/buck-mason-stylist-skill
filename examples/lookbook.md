@@ -180,7 +180,16 @@ Checkout (in your browser): https://www.buckmason.com/cart/9999:1,9998:1
 
 ## 6. Customer says "just buy it for me, no browser"
 
-Use the **MPP** flow (Merchant Payments Protocol) at `POST /mcp/buckmason/checkout`. The agent fetches a one-time **Stripe Shared Payment Token (SPT)** from the customer's Link wallet via [`stripe/link-cli`](https://github.com/stripe/link-cli) — the customer push-approves the spend on their phone, and that approval IS the consent. Full lifecycle in `references/mpp.md`.
+Use the **MPP** flow (Merchant Payments Protocol) at `POST /mcp/buckmason/checkout`. The agent fetches a one-time **Stripe Shared Payment Token (SPT)** from the customer's Link wallet via [`stripe/link-cli`](https://www.npmjs.com/package/@stripe/link-cli) — the customer push-approves the spend on their phone, and that approval IS the consent. Full lifecycle in `references/mpp.md`.
+
+**Before `link-cli spend-request create --request-approval`, the agent MUST read aloud, in plain English, in the same turn:**
+1. Every line item with size + quantity + unit price.
+2. Subtotal, taxes/shipping if available, **and the final total in dollars**.
+3. The shipping destination (city + zip is enough; full address optional).
+4. Buck Mason's return window (30 days, free returns).
+5. That this charge is **non-reversible by the agent** — refunds go through orders.buckmason.com after the fact.
+
+Wait for an unambiguous "yes, go ahead" before invoking `link-cli`. Do not fast-path it.
 
 Quick shape (read `references/mpp.md` for the complete contract):
 

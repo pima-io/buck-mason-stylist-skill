@@ -1,7 +1,7 @@
 ---
 name: buck-mason-stylist
 description: Personal shopping skill for Buck Mason. Stock-checks (online + nearby store), wardrobe gap analysis, season- and event-aware outfit suggestions, AI try-on lookbooks, and one-shot cart + checkout. Customer brings sizes once; the agent reuses them across requests.
-version: 0.1.4
+version: 0.1.5
 license: MIT
 authors:
   - Buck Mason / Pima
@@ -36,9 +36,13 @@ metadata:
       python: [python-pptx, Pillow]
       optional_binaries: [magick]
       optional_clis:
-        - name: stripe/link-cli
+        - name: "@stripe/link-cli"
           purpose: "Required only for the fully-agent-driven MPP checkout path (workflow #4 step 3). Mints a one-time Stripe Shared Payment Token from the customer's Link wallet."
           install: "npm i -g @stripe/link-cli"
+          publisher: "Stripe (verified npm publisher)"
+          source: "https://github.com/stripe/link-cli"
+          npm: "https://www.npmjs.com/package/@stripe/link-cli"
+          notes: "Install only from the @stripe scope on npm. Pin to a reviewed version in production deployments. The skill never bundles or vendors this CLI."
     categories: [commerce, image-generation, lookbook]
     tags: [buck-mason, pima, stylist, shopping, stock, mcp]
 ---
@@ -83,7 +87,7 @@ The customer should keep three plain-text files under their agent's persistent m
 
 Templates are in `templates/` — `profile.example.md`, `wardrobe.example.md`, `events.example.md`. On first run, if `profile.md` is missing, walk the customer through filling it in. Don't ask for everything at once — start with sizes (shirt, pant waist+inseam, short, jacket, shoe), then home zip, then save and proceed.
 
-If the customer wants the skill to access their account-wide history (all past orders for wardrobe seeding), the agent runs the email + magic-link flow (`POST /api/verify_order_or_email` → email sent → `POST /api/login_via_token` returns a JWT). **This requires the agent to have a tool that reads the customer's email** (e.g., a Gmail MCP server) or to ask the customer to paste the link back from their inbox. Always confirm the retrieval method with the user before sending the email. Account linking is optional — most order-tracking and return flows can use the guest `?order_code=<code>` path instead, which sidesteps the email entirely (workflow #5).
+**Default to the guest order-code path** (`?order_code=<code>`) for any single-order lookup, return, or tracking request — it sidesteps the email round-trip entirely and never produces a JWT or session token. The email + magic-link flow is **opt-in only** and is only worth the friction if the customer explicitly asks for account-wide history (e.g., seeding their wardrobe from every past order). Even then, prefer asking the customer to paste the magic link back from their own inbox over reading the email programmatically. If the agent does read mail, the operator must explicitly authorize a Gmail/IMAP MCP and the agent must restate that authorization before each retrieval. The full retrieval-method confirmation is in workflow #5.
 
 ## Data sources
 
@@ -114,7 +118,7 @@ The `/api/*` endpoints (documented in `docs/advanced/pima-api.md`) power **order
 | Taxonomy by gender | `GET /mcp/buckmason/categories?gender=…` | |
 | Capsule recommendation for a context | `GET /mcp/buckmason/recommend?gender=m&occasion=wedding&dress_code=smart_casual&sizes[shirt]=L&sizes[pant]=32x32&sizes[shoe]=10.5&near_zip=…` | Best-effort heuristic. |
 | Build a cart + checkout link | `POST /mcp/buckmason/cart` | Stateless. Returns a Shopify cart permalink for the customer to open in their browser. |
-| Customer login & past-order wardrobe seeding | `POST /api/verify_order_or_email` → magic link → `POST /api/login_via_token` → `GET /api/order_history` | Optional. Requires the agent to read the customer's email OR the customer to paste the link back. Use the `?order_code=` path (next row) if the user just wants one order, not their full history. |
+| Customer login & past-order wardrobe seeding | `POST /api/verify_order_or_email` → magic link → `POST /api/login_via_token` → `GET /api/order_history` | **Opt-in only**. Use this *only* when the customer explicitly asks for account-wide history. Prefer the customer pasting the link back; reading mail programmatically requires explicit operator authorization for the email MCP. **Default to `?order_code=` (next row)** for one-off lookups. |
 | **Order tracking + fulfillment status** | `GET /api/order_history?token=<jwt>` (auth) **or** `?order_code=<code>` (guest) | Returns shipments[] with `status`, `tracking_code`, `tracking_url`, `shipped_at`, `estimated_delivery_at`. Same endpoint that powers orders.buckmason.com. |
 | **Initiate / manage a return** | `POST /api/customer_returns` + the return_reasons / shipping_rates helpers in `docs/advanced/pima-api.md` | Powers the Returns Management portal at orders.buckmason.com. |
 | Fully agent-driven checkout (no browser) | `POST /mcp/buckmason/checkout` (MPP) | HTTP 402 challenge → agent mints a Stripe SPT via `stripe/link-cli` (push-approved by the customer in their Link app) → re-POST with `Authorization: Payment <SPT>`. Read `references/mpp.md`. |
@@ -234,8 +238,9 @@ These are the most common post-purchase questions. They run on the same `/api/*`
      1. `POST /api/verify_order_or_email` with `{ value: "<email>", source: "returns" }` — Pima emails a magic link to the customer.
      2. The customer clicks the link in their inbox, OR the agent reads the email itself and extracts the token, OR the customer pastes the URL/token back into the chat. Then `POST /api/login_via_token` with `{ token: "<token>" }` returns a JWT. Save it to `profile.md → jwt` so the next session starts at path (a).
 
-   **CRITICAL — magic-link capability check.** The magic-link path requires the agent to either:
-   - Have a tool that reads the customer's email (e.g., a Gmail MCP server with read scope on the inbox of the email used for the purchase), OR
+   **CRITICAL — magic-link capability check.** **Prefer "paste the link back" over agent-reads-mail.** The magic-link path requires the agent to either:
+   - Have the customer paste the link / token back from their inbox after they receive the email (preferred — no extra capability granted to the agent), OR
+   - Have a tool that reads the customer's email (e.g., a Gmail MCP server with read scope on the inbox of the email used for the purchase) — only with explicit operator authorization for that MCP server, and the agent restates that authorization in the same turn it reads the email, OR
    - Ask the customer to forward / paste back the link from their inbox (manual relay).
 
    **Before triggering `/api/verify_order_or_email`, confirm with the user how the link will be retrieved.** Surface the options in plain English: "I can either read the link from your inbox if you've connected an email tool, or you can paste it back to me after it arrives — which would you prefer?" Don't silently fire the email and then deadlock waiting for the token.

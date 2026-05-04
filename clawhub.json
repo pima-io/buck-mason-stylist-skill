@@ -1,7 +1,7 @@
 {
   "name": "buck-mason-stylist-skill",
   "namespace": "nickmerwin",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "visibility": "public",
   "description": "Personal shopping skill for Buck Mason — stock checks, wardrobe gap analysis, AI try-on lookbooks (gpt-image-2), and one-shot cart + checkout (browser link or fully agent-driven via MPP + stripe/link-cli). Talks to the pima.io MCP at /mcp/buckmason/*.",
   "homepage": "https://github.com/pima-io/buck-mason-stylist-skill",
@@ -24,7 +24,15 @@
     "optional_binaries": ["magick"],
     "python": ["python-pptx", "Pillow"],
     "optional_clis": [
-      {"name": "stripe/link-cli", "install": "npm i -g @stripe/link-cli", "purpose": "MPP fully-agent-driven checkout"}
+      {
+        "name": "@stripe/link-cli",
+        "install": "npm i -g @stripe/link-cli",
+        "publisher": "Stripe (verified npm publisher)",
+        "source": "https://github.com/stripe/link-cli",
+        "npm": "https://www.npmjs.com/package/@stripe/link-cli",
+        "purpose": "MPP fully-agent-driven checkout (workflow #4 step 3)",
+        "notes": "Install only from the @stripe scope on npm. Pin to a reviewed version in production deployments. The skill never bundles or vendors this CLI."
+      }
     ]
   },
   "categories": ["commerce", "image-generation", "lookbook"],
