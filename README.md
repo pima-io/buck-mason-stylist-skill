@@ -72,6 +72,7 @@ See `examples/stock-check.md` and `examples/lookbook.md` for full walkthroughs.
 | `templates/*.example.md` | Copy these into your workspace |
 | `examples/*.md` | End-to-end walkthroughs |
 | `PUBLISHING.md` | ClawHub distribution path |
+| `SECURITY.md` | Threat model, data flows, opt-in capability matrix, vulnerability reporting |
 
 ## Install via ClawHub
 
