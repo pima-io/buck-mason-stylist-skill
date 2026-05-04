@@ -1,7 +1,7 @@
 ---
 name: buck-mason-stylist
 description: Personal shopping skill for Buck Mason. Stock-checks (online + nearby store), wardrobe gap analysis, season- and event-aware outfit suggestions, AI try-on lookbooks, and one-shot cart + checkout. Customer brings sizes once; the agent reuses them across requests.
-version: 0.1.6
+version: 0.1.7
 license: MIT
 authors:
   - Buck Mason / Pima
@@ -12,37 +12,27 @@ compatibility:
 metadata:
   openclaw:
     requires:
-      env:
-        - name: OPENAI_API_KEY
-          required: true
-          purpose: |
-            Used **only** for the AI try-on lookbook flow (workflow #3 of this
-            skill). The skill calls OpenAI's `/v1/images/edits` endpoint with
-            `model: "gpt-image-2"` to generate editorial try-on images of the
-            customer wearing recommended outfits. No text-completion calls,
-            no chat calls, no other endpoints. Stock checks, recommendations,
-            cart/checkout, and order tracking do NOT require this key.
-          format: "OpenAI API secret key, prefix `sk-...`"
-          obtain_url: "https://platform.openai.com/api-keys"
-          notes: |
-            The OpenAI organization tied to this key must be **verified for
-            `gpt-image-2`** access. Unverified orgs receive 403 from the
-            image-edits endpoint; the skill will surface that as an
-            actionable error rather than silently downgrading to
-            `gpt-image-1` (see `references/image-generation.md`). See
-            https://help.openai.com/en/articles/10910291 for verification.
-          how_to_set: "export OPENAI_API_KEY=sk-... in the shell that runs the agent, or set it in the agent host's secrets manager."
+      env: [OPENAI_API_KEY]
       binaries: [curl, jq]
       python: [python-pptx, Pillow]
       optional_binaries: [magick]
-      optional_clis:
-        - name: "@stripe/link-cli"
-          purpose: "Required only for the fully-agent-driven MPP checkout path (workflow #4 step 3). Mints a one-time Stripe Shared Payment Token from the customer's Link wallet."
-          install: "npm i -g @stripe/link-cli"
-          publisher: "Stripe (verified npm publisher)"
-          source: "https://github.com/stripe/link-cli"
-          npm: "https://www.npmjs.com/package/@stripe/link-cli"
-          notes: "Install only from the @stripe scope on npm. Pin to a reviewed version in production deployments. The skill never bundles or vendors this CLI."
+      optional_clis: ["@stripe/link-cli"]
+    env_details:
+      OPENAI_API_KEY:
+        required: true
+        purpose: "Used only for the AI try-on lookbook flow (workflow #3). The skill calls OpenAI's /v1/images/edits with model gpt-image-2. Stock checks, recommendations, cart/checkout, and order tracking do NOT require this key."
+        format: "OpenAI API secret key, prefix sk-..."
+        obtain_url: "https://platform.openai.com/api-keys"
+        notes: "The OpenAI organization must be verified for gpt-image-2 access. Unverified orgs get 403 from /v1/images/edits; the skill surfaces that as an actionable error rather than silently downgrading. See https://help.openai.com/en/articles/10910291."
+        how_to_set: "export OPENAI_API_KEY=sk-..."
+    optional_cli_details:
+      "@stripe/link-cli":
+        purpose: "Required only for the fully-agent-driven MPP checkout path (workflow #4 step 3). Mints a one-time Stripe Shared Payment Token from the customer's Link wallet."
+        install: "npm i -g @stripe/link-cli"
+        publisher: "Stripe (verified npm publisher)"
+        source: "https://github.com/stripe/link-cli"
+        npm: "https://www.npmjs.com/package/@stripe/link-cli"
+        notes: "Install only from the @stripe scope. Pin to a reviewed version in production. The skill never bundles or vendors this CLI."
     categories: [commerce, image-generation, lookbook]
     tags: [buck-mason, pima, stylist, shopping, stock, mcp]
 ---

@@ -1,16 +1,16 @@
 {
   "name": "buck-mason-stylist-skill",
   "namespace": "nickmerwin",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "visibility": "public",
   "description": "Personal shopping skill for Buck Mason — stock checks, wardrobe gap analysis, AI try-on lookbooks (gpt-image-2), and one-shot cart + checkout (browser link or fully agent-driven via MPP + stripe/link-cli). Talks to the pima.io MCP at /mcp/buckmason/*.",
   "homepage": "https://github.com/pima-io/buck-mason-stylist-skill",
   "repository": "https://github.com/pima-io/buck-mason-stylist-skill",
   "license": "MIT",
   "primaryEnv": ["OPENAI_API_KEY"],
-  "env": [
-    {
-      "name": "OPENAI_API_KEY",
+  "env": ["OPENAI_API_KEY"],
+  "envDetails": {
+    "OPENAI_API_KEY": {
       "required": true,
       "purpose": "Used by workflow #3 (AI try-on lookbooks) to call OpenAI /v1/images/edits with model gpt-image-2. Other workflows do not require this key.",
       "format": "OpenAI API secret key (sk-...)",
@@ -18,22 +18,22 @@
       "verification_required": "gpt-image-2 — see https://help.openai.com/en/articles/10910291",
       "how_to_set": "export OPENAI_API_KEY=sk-..."
     }
-  ],
+  },
   "requires": {
     "binaries": ["curl", "jq"],
     "optional_binaries": ["magick"],
     "python": ["python-pptx", "Pillow"],
-    "optional_clis": [
-      {
-        "name": "@stripe/link-cli",
-        "install": "npm i -g @stripe/link-cli",
-        "publisher": "Stripe (verified npm publisher)",
-        "source": "https://github.com/stripe/link-cli",
-        "npm": "https://www.npmjs.com/package/@stripe/link-cli",
-        "purpose": "MPP fully-agent-driven checkout (workflow #4 step 3)",
-        "notes": "Install only from the @stripe scope on npm. Pin to a reviewed version in production deployments. The skill never bundles or vendors this CLI."
-      }
-    ]
+    "optional_clis": ["@stripe/link-cli"]
+  },
+  "optionalCliDetails": {
+    "@stripe/link-cli": {
+      "install": "npm i -g @stripe/link-cli",
+      "publisher": "Stripe (verified npm publisher)",
+      "source": "https://github.com/stripe/link-cli",
+      "npm": "https://www.npmjs.com/package/@stripe/link-cli",
+      "purpose": "MPP fully-agent-driven checkout (workflow #4 step 3)",
+      "notes": "Install only from the @stripe scope on npm. Pin to a reviewed version in production deployments. The skill never bundles or vendors this CLI."
+    }
   },
   "categories": ["commerce", "image-generation", "lookbook"],
   "tags": ["buck-mason", "pima", "stylist", "shopping", "stock", "mcp"],
@@ -48,7 +48,7 @@
       {"path": "<workspace>/profile.md", "mode": "read"},
       {"path": "<workspace>/wardrobe.md", "mode": "read"},
       {"path": "<workspace>/events.md", "mode": "read"},
-      {"path": "<workspace>/lookbook/", "mode": "write", "purpose": "Generated lookbook PNG/PDF/PPTX output"}
+      {"path": "<workspace>/lookbook/", "mode": "write", "purpose": "Generated lookbook PNG/PPTX/HTML output"}
     ]
   }
 }
