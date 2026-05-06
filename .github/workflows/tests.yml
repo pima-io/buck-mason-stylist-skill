@@ -62,7 +62,9 @@ jobs:
   scripts-help:
     # Sanity-check that every bundled script's --help renders without error.
     # Catches argparse breakage and bash syntax issues independent of unit
-    # tests.
+    # tests. The scripts lazy-import optional deps (e.g. Pillow), so --help
+    # works without them — but install Pillow anyway as a belt-and-suspenders
+    # check that import-time dependencies stay clean.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +72,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install runtime deps so --help imports succeed
+        run: |
+          python -m pip install --upgrade pip
+          pip install Pillow
 
       - name: Confirm --help on every script
         run: |

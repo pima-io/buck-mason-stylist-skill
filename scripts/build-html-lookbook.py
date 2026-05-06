@@ -43,7 +43,10 @@ The script is deterministic: same inputs → same outputs (modulo the gpt-image-
 PNGs, which are produced separately and supplied via --look-images).
 """
 import argparse, html, json, pathlib, subprocess, sys
-from PIL import Image
+# Pillow is imported lazily inside the functions that need it — keeps
+# `--help` discoverable without requiring the optional dep installed.
+# (CI's scripts-help job + downstream agents that just want to read
+#  usage shouldn't have to `pip install Pillow` first.)
 
 # ── Inputs ───────────────────────────────────────────────────────────────────
 
@@ -96,6 +99,8 @@ PAGE_URL       = CFG["page_url"].rstrip("/") + "/"
 OG_IMAGE_URL   = PAGE_URL + "og.jpg"
 
 # ── Asset prep ───────────────────────────────────────────────────────────────
+# Lazy-import Pillow at first actual use so `--help` works without the dep.
+from PIL import Image  # noqa: E402
 
 def web_jpeg(src, dst, max_w=1200, quality=85):
     img = Image.open(src).convert("RGB")
