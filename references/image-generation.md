@@ -146,6 +146,45 @@ Notes:
 - `n=1` per call — call repeatedly with varied prompts for a lookbook rather than asking for n>1 in one call (each image gets a distinct setting/pose).
 - `gpt-image-2` adds optional reasoning ("thinking" mode) which improves garment-fidelity and identity preservation for try-on; enable with `reasoning_effort: "medium"` if your client supports it.
 
+### Run multi-look generations in parallel — NOT sequentially
+
+Each look's image-edit call is independent: same identity anchors, same model, just a different garment + setting + composition. **Issue them concurrently** when generating a multi-look lookbook. A 3-look Premium run takes ~30–60s in parallel vs. ~90–180s sequentially — the wallclock saving is the difference between an interactive flow and a customer who wandered off.
+
+```python
+import base64, concurrent.futures, pathlib
+from openai import OpenAI
+client = OpenAI()
+
+def gen_one(look_id: str, prompt: str, image_paths: list[pathlib.Path], out: pathlib.Path):
+    """One gpt-image-2 image-edit call. Independent from the others."""
+    result = client.images.edit(
+        model="gpt-image-2",
+        image=[open(p, "rb") for p in image_paths],
+        prompt=prompt,
+        size="1024x1536",
+        quality="high",
+        n=1,
+    )
+    out.write_bytes(base64.b64decode(result.data[0].b64_json))
+    return look_id, out
+
+# Fire all looks concurrently. ThreadPoolExecutor is fine here — the work
+# is I/O-bound (waiting on OpenAI), GIL doesn't matter, and a small thread
+# pool keeps the rate-limit footprint modest.
+with concurrent.futures.ThreadPoolExecutor(max_workers=len(LOOKS)) as ex:
+    futures = [ex.submit(gen_one, lk["id"], lk["prompt"], lk["images"], lk["out"])
+               for lk in LOOKS]
+    for fut in concurrent.futures.as_completed(futures):
+        look_id, out = fut.result()
+        print(f"  ✓ {look_id} → {out}")
+```
+
+Bound the pool at the number of looks (typically 2–5) so you don't fan out beyond the actual work. OpenAI's per-user rate limits comfortably absorb a few concurrent image edits; you don't need a semaphore unless you're driving many customers from one key.
+
+**On failure of a single look**: catch + log inside `gen_one`; let the others finish. Premium-tier orchestration falls back per-look (Editorial for the failed one, Premium for the rest) rather than aborting the whole run.
+
+**Don't parallelize across customers from the same OpenAI key** — that's a different concern (rate limit fairness, billing, identity-cache hygiene). Each customer's lookbook gets its own thread pool scoped to that customer's looks; runs across customers stay sequential at the orchestrator level.
+
 ## Prompt template
 
 The prompt is **structured into five labeled blocks**, in this exact order. Each block is non-negotiable; never collapse them into prose because the model parses these labels as instructions. Always include the IDENTITY and GARMENT blocks even if they feel redundant — the model uses them to suppress its defaults.

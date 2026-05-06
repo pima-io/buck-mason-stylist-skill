@@ -46,7 +46,7 @@ step with the run config + picks ready, and the agent generates the look
 images separately, drops them into runs/<id>/looks/, then re-runs the
 orchestrator with --resume-build to pick up at the build stage.
 """
-import argparse, atexit, contextlib, json, os, pathlib, re, subprocess, sys, time, urllib.parse
+import argparse, atexit, concurrent.futures, contextlib, json, os, pathlib, re, subprocess, sys, time, urllib.parse
 
 ROOT = pathlib.Path(__file__).resolve().parent
 SKILL_ROOT = ROOT.parent
@@ -282,10 +282,37 @@ def parse_profile(path: pathlib.Path) -> dict:
             elif v.lower() in ("null", "none", ""):
                 v = None
             out.setdefault(k, v)
-    # Reference photo paths
+    # Reference photo paths — accept BOTH forms in the wild:
+    #   (a) Schema form (templates/profile.example.md):
+    #       reference_photos:
+    #         - path: /Users/.../file.jpeg
+    #   (b) Heading-list form (real-world profile.md):
+    #       ## Reference photos
+    #       - /Users/.../file.jpeg  (parenthetical description ignored)
     photos = []
+    # Form (a):
     for m in re.finditer(r'^\s*-\s*path:\s*(.+?)\s*(?:#.*)?$', text, re.M):
         photos.append(m.group(1).strip().strip('"').strip("'"))
+    # Form (b):
+    if not photos:
+        section = re.search(
+            r'^\s*##\s*Reference\s+photos?\s*$\n(.*?)(?=^\s*##\s|\Z)',
+            text, re.M | re.S | re.I,
+        )
+        if section:
+            for line in section.group(1).splitlines():
+                # Path may contain spaces (e.g. "Styling example pics"); capture
+                # non-greedy through the file extension, then accept end-of-
+                # path-marker = space-then-paren / space-then-hash / EOL.
+                m = re.match(
+                    r'^\s*-\s*(/.+?\.(?:jpe?g|png|heic|webp))(?:\s+[(#].*|\s*)$',
+                    line, re.I,
+                )
+                if m:
+                    photos.append(m.group(1))
+    # De-dup; absolute paths only (defense against parsing parenthetical comments)
+    photos = [p for p in photos if p.startswith("/")]
+    photos = list(dict.fromkeys(photos))
     if photos:
         out["reference_photos"] = photos
     # sizes block
@@ -515,8 +542,13 @@ if tier == "premium":
             f"  {looks_dir}/.lookbook_id  (must contain: {lookbook_id})\n"
             f"\n"
             f"Next steps (pick ONE):\n"
-            f"  (a) Generate the try-on images per references/image-generation.md,\n"
-            f"      drop them at the paths above, write the .lookbook_id marker,\n"
+            f"  (a) Generate the try-on images per references/image-generation.md.\n"
+            f"      ⚡ Issue the gpt-image-2 calls IN PARALLEL — each look is an\n"
+            f"         independent image-edit call; sequential generation costs an\n"
+            f"         extra 30–60s per look of wallclock for no reason. See\n"
+            f"         references/image-generation.md § \"Run multi-look generations\n"
+            f"         in parallel\" for the worked concurrent.futures pattern.\n"
+            f"      Drop the PNGs at the paths above, write the .lookbook_id marker,\n"
             f"      then re-run this orchestrator with --resume-build.\n"
             f"  (b) Fall back to Editorial tier (no AI try-on) with --tier editorial.\n"
             f"\n"
@@ -533,30 +565,44 @@ if tier == "premium":
     # failure this whole pipeline is built to prevent.
     if not args.no_verify and reference_photos and openai_key_set:
         verify_failures = []
-        for png in sorted(looks_dir.glob("look*.png")):
-            with timings.phase("verify_face", look=png.name):
-                v = subprocess.run(
-                    ["python3", str(ROOT / "verify-face.py"),
-                     "--generated", str(png),
-                     *sum([["--reference", rp] for rp in reference_photos], [])],
-                    capture_output=True, text=True,
-                )
-            if v.returncode == 1:
-                # Try to surface the rubric reason from the JSON
-                try:
-                    info = json.loads(v.stdout)
-                    reason = info.get("reason", "(no reason)")
-                    scores = info.get("scores", {})
-                    off_putting = info.get("off_putting", "?")
-                    detail = f"{png.name}: {reason} | scores={scores} | off_putting={off_putting}"
-                except Exception:
-                    detail = f"{png.name}: {v.stdout.strip()[:200]}"
-                verify_failures.append(detail)
-            elif v.returncode == 2:
-                # Inconclusive — surface as a setup error, don't auto-fall-through
-                fail(run_dir, "verify-face",
-                     f"face-verification gate inconclusive for {png.name}: {v.stderr.strip()[:200]}",
-                     tier=tier)
+        pngs = sorted(looks_dir.glob("look*.png"))
+
+        # Verify-face calls are independent per look (same reference photos,
+        # different generated PNG). Issue them concurrently — each call is a
+        # GPT-4o-vision round-trip ~5-15s, so a 3-look gate sequentially is
+        # 15-45s vs ~5-15s in parallel. Bound at the look count.
+        def verify_one(png):
+            t0 = time.time()
+            v = subprocess.run(
+                ["python3", str(ROOT / "verify-face.py"),
+                 "--generated", str(png),
+                 *sum([["--reference", rp] for rp in reference_photos], [])],
+                capture_output=True, text=True,
+            )
+            return png, v, round(time.time() - t0, 2)
+
+        # Per-look duration list, captured by reference into the phase meta
+        # so the timing entry includes per-look detail without depending on
+        # phase-finally ordering.
+        per_look = []
+        with timings.phase("verify_face_concurrent", looks=len(pngs), per_look=per_look):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(pngs))) as ex:
+                for png, v, dur in ex.map(verify_one, pngs):
+                    per_look.append({"look": png.name, "duration_s": dur, "rc": v.returncode})
+                    if v.returncode == 1:
+                        try:
+                            info = json.loads(v.stdout)
+                            reason = info.get("reason", "(no reason)")
+                            scores = info.get("scores", {})
+                            off_putting = info.get("off_putting", "?")
+                            detail = f"{png.name}: {reason} | scores={scores} | off_putting={off_putting}"
+                        except Exception:
+                            detail = f"{png.name}: {v.stdout.strip()[:200]}"
+                        verify_failures.append(detail)
+                    elif v.returncode == 2:
+                        fail(run_dir, "verify-face",
+                             f"face-verification gate inconclusive for {png.name}: {v.stderr.strip()[:200]}",
+                             tier=tier)
         if verify_failures:
             body = (
                 f"# Lookbook run — {today}\n"
