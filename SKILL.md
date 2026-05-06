@@ -1,7 +1,7 @@
 ---
 name: buck-mason-stylist
 description: Personal shopping skill for Buck Mason. Stock-checks (online + nearby store), wardrobe gap analysis, season- and event-aware outfit suggestions, AI try-on lookbooks, and one-shot cart + checkout. Customer brings sizes once; the agent reuses them across requests.
-version: 0.3.2
+version: 0.3.3
 license: MIT
 authors:
   - Buck Mason / Pima
@@ -46,15 +46,17 @@ You are acting as a personal shopper for Buck Mason. The customer has loaded thi
 
 ## Environment
 
-This skill needs **one** environment variable, and only for one workflow:
+**Premium try-on uses one optional environment variable** — every other workflow runs with no env config at all.
 
-| Var | Required for | How to set |
-|---|---|---|
-| `OPENAI_API_KEY` | Workflow #3 (AI try-on lookbooks) — the skill posts to `https://api.openai.com/v1/images/edits` with `model: "gpt-image-2"`. | `export OPENAI_API_KEY=sk-...` in the shell or secret manager that runs the agent. Get a key at <https://platform.openai.com/api-keys>. |
+| Var | Optional / Required | Used by | How to set |
+|---|---|---|---|
+| `OPENAI_API_KEY` | **Optional** — gates Premium-tier lookbook generation only | Workflow #3 Premium tier (gpt-image-2 try-on imagery via `https://api.openai.com/v1/images/edits`) | `export OPENAI_API_KEY=sk-...` in the shell or secret manager that runs the agent. Get a key at <https://platform.openai.com/api-keys>. |
 
-**`gpt-image-2` access is gated.** The OpenAI organization tied to the key must be **verified for `gpt-image-2`** (see <https://help.openai.com/en/articles/10910291>). Unverified orgs get HTTP 403 from `/v1/images/edits` — the skill surfaces that as an actionable error rather than falling back to `gpt-image-1` (identity drift, weaker garment-color fidelity). The other workflows (stock check, recommend, cart, checkout, order tracking) do **not** require an OpenAI key — they only call the pima.io MCP.
+Stock checks, wardrobe gap analysis, recommend, cart, MPP checkout, order tracking, and the **Editorial** + **Minimum** lookbook tiers all work with **no env config**. The Premium tier (gpt-image-2 try-on imagery) is the only thing that needs `OPENAI_API_KEY`, and even then the skill falls through to Editorial tier if the key is missing rather than blocking.
 
-If `OPENAI_API_KEY` is unset and the user asks for a try-on image, tell them how to set it (the table above) and offer the text-only / flat-lay lookbook fallback in the meantime — don't block the rest of the flow.
+**`gpt-image-2` access is gated** when you do set the key. The OpenAI organization tied to the key must be **verified for `gpt-image-2`** (see <https://help.openai.com/en/articles/10910291>). Unverified orgs get HTTP 403 from `/v1/images/edits` — the skill surfaces that as an actionable error and falls through to Editorial tier rather than silently downgrading to a lesser image model.
+
+If `OPENAI_API_KEY` is unset and the customer asks for a try-on image, tell them how to set it (the table above) and produce the Editorial-tier lookbook in the meantime — don't block the rest of the flow.
 
 ## When to use this skill
 
