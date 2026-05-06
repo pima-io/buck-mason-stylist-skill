@@ -51,6 +51,11 @@ import argparse, atexit, concurrent.futures, contextlib, json, os, pathlib, re, 
 ROOT = pathlib.Path(__file__).resolve().parent
 SKILL_ROOT = ROOT.parent
 
+# Make scripts/lib importable when this file is invoked directly.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from lib.profile import parse_profile_path  # noqa: E402
+
 # ── Timing log ──────────────────────────────────────────────────────────────
 # Phase-level timings written to <run_dir>/_timings.jsonl (machine, per-phase
 # JSON line) and <run_dir>/_run.log (human-readable, sorted-by-duration). On
@@ -262,77 +267,9 @@ args = ap.parse_args()
 args.runs_dir.mkdir(parents=True, exist_ok=True)
 args.wishlist.parent.mkdir(parents=True, exist_ok=True)
 
-# ── Profile loader (small, doesn't fight the schema) ───────────────────────
-def parse_profile(path: pathlib.Path) -> dict:
-    """Pull the YAML-ish key:value lines from profile.md. Cheap and good
-    enough for the headless orchestrator — full schema lives in
-    templates/profile.schema.json."""
-    if not path.exists():
-        return {}
-    text = path.read_text()
-    out = {}
-    # Capture top-level "- key: value" or "key: value" lines
-    for line in text.splitlines():
-        m = re.match(r'^\s*-?\s*([a-z][a-z0-9_]*)\s*:\s*(.+?)\s*(?:#.*)?$', line)
-        if m:
-            k, v = m.group(1), m.group(2).strip()
-            v = v.strip('"').strip("'")
-            if v.lower() in ("true", "false"):
-                v = (v.lower() == "true")
-            elif v.lower() in ("null", "none", ""):
-                v = None
-            out.setdefault(k, v)
-    # Reference photo paths — accept BOTH forms in the wild:
-    #   (a) Schema form (templates/profile.example.md):
-    #       reference_photos:
-    #         - path: /Users/.../file.jpeg
-    #   (b) Heading-list form (real-world profile.md):
-    #       ## Reference photos
-    #       - /Users/.../file.jpeg  (parenthetical description ignored)
-    photos = []
-    # Form (a):
-    for m in re.finditer(r'^\s*-\s*path:\s*(.+?)\s*(?:#.*)?$', text, re.M):
-        photos.append(m.group(1).strip().strip('"').strip("'"))
-    # Form (b):
-    if not photos:
-        section = re.search(
-            r'^\s*##\s*Reference\s+photos?\s*$\n(.*?)(?=^\s*##\s|\Z)',
-            text, re.M | re.S | re.I,
-        )
-        if section:
-            for line in section.group(1).splitlines():
-                # Path may contain spaces (e.g. "Styling example pics"); capture
-                # non-greedy through the file extension, then accept end-of-
-                # path-marker = space-then-paren / space-then-hash / EOL.
-                m = re.match(
-                    r'^\s*-\s*(/.+?\.(?:jpe?g|png|heic|webp))(?:\s+[(#].*|\s*)$',
-                    line, re.I,
-                )
-                if m:
-                    photos.append(m.group(1))
-    # De-dup; absolute paths only (defense against parsing parenthetical comments)
-    photos = [p for p in photos if p.startswith("/")]
-    photos = list(dict.fromkeys(photos))
-    if photos:
-        out["reference_photos"] = photos
-    # sizes block
-    sizes = {}
-    in_sizes = False
-    for line in text.splitlines():
-        if re.match(r'^\s*##\s*Sizes', line, re.I):
-            in_sizes = True; continue
-        if in_sizes and re.match(r'^\s*##', line):
-            in_sizes = False
-        if in_sizes:
-            m = re.match(r'^\s*-?\s*(shirt|tee|pant|short|jacket|sport_coat|shoe|belt|jean)\s*:\s*([^\s#]+)', line)
-            if m:
-                sizes[m.group(1)] = m.group(2)
-    if sizes:
-        out["sizes"] = sizes
-    return out
-
+# Profile parsing lives in scripts/lib/profile.py for unit-testability.
 with timings.phase("parse_profile", path=str(args.profile)):
-    profile = parse_profile(args.profile)
+    profile = parse_profile_path(args.profile) if args.profile.exists() else {}
 gender               = profile.get("gender", "u")
 sizes                = profile.get("sizes", {})
 ethos                = profile.get("style_ethos", "")

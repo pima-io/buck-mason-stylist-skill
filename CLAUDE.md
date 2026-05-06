@@ -6,11 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A **Claude / Codex / agent skill** — markdown + JSON, no application code. The agent that loads `SKILL.md` becomes a Buck Mason personal shopper that talks to the public `pima.io/mcp/buckmason/*` endpoints. There is no server, no compiled artifact, no test suite, no CI. Editing this repo means editing prompt content and reference docs that an LLM consumes at runtime.
 
-## No build / test / lint
+## Build / test / lint
 
 - There is nothing to compile. Changes ship as soon as `clawhub publish` completes (see `PUBLISHING.md`).
-- There is no automated test harness. "Testing" means loading the skill into an agent (Claude Code, Codex, ChatGPT) and walking the relevant workflow end-to-end against `pima.io/mcp/buckmason/*`.
-- Validate before publish: `python -c 'import json; json.load(open("clawhub.json"))'` and visually scan the YAML frontmatter at the top of `SKILL.md` for parser-breaking edits.
+- **`python -m pytest tests/`** runs the unit + smoke tests for the script bundle. Coverage: `parse_profile` (regex/format quirks), `score-calendar-event` (rubric worked examples), `validate-lookbook` (each L1–L10 gate with fixture deploy dirs), `verify-face` (threshold logic + JSON parsing, OpenAI mocked via local HTTP server), `build-html-lookbook` (smoke + marker enforcement). 45 tests as of v0.6.0; `pip install Pillow pytest` first.
+- **CI runs on every push + PR** via `.github/workflows/tests.yml` — pytest matrix on Python 3.11 + 3.12, plus a `scripts-help` job that renders `--help` on every bundled script (catches argparse breakage and bash syntax issues independent of unit tests).
+- "Live testing" means loading the skill into an agent (Claude Code, Codex, ChatGPT) and walking the relevant workflow end-to-end against `pima.io/mcp/buckmason/*`. Tests cover the deterministic plumbing; only live-walk the agent flows.
+- Validate before publish: `python -c 'import json; json.load(open("clawhub.json"))'` and visually scan the YAML frontmatter at the top of `SKILL.md` for parser-breaking edits. The CI `validate clawhub.json + SKILL.md frontmatter` step also enforces the lockstep version invariant.
 - Node ≥ 20.12 is required to run `clawhub` itself (see `.tool-versions` → `nodejs 20.20.2`). Nothing in the repo is Node code.
 
 ## Versioning is lockstep — bump in three places
