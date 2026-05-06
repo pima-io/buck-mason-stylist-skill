@@ -52,17 +52,102 @@ ROOT = pathlib.Path(__file__).resolve().parent
 SKILL_ROOT = ROOT.parent
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
-ap = argparse.ArgumentParser(description="Headless lookbook orchestrator.")
+EPILOG = """\
+Run states (first line of stdout + first line of summary.md):
+  ✅ Deployed: <url>             — full success; URL is permanent if --auto
+                                    triggered the deploy and the project was
+                                    fresh (deploy-lookbook.sh --no-overwrite).
+  📦 READY TO DEPLOY              — local build + validation passed but the
+                                    deploy gate is closed (profile.md →
+                                    preferred_lookbook_host_auto is unset).
+                                    The summary names the exact interactive
+                                    `bash scripts/deploy-lookbook.sh ...`
+                                    command to publish.
+  READY_FOR_PREMIUM_IMAGE_STEP   — Premium tier was selected but
+                                    runs/<id>/looks/look<N>.png aren't there
+                                    yet. Generate the try-on imagery per
+                                    references/image-generation.md, drop the
+                                    PNGs + the .lookbook_id marker, then
+                                    re-run with --resume-build. (The
+                                    orchestrator never invokes gpt-image-2
+                                    itself — that step lives outside the
+                                    deterministic chain because the prompt
+                                    template is taste-aware.)
+  ❌ BLOCKER: <reason>            — fail-closed at fetch / discover / curate
+                                    / build / validate-local / deploy /
+                                    validate-deployed.
+
+Examples:
+  # Weekly newsletter (Editorial tier; honors profile gate for deploy)
+  python3 scripts/run-headless-lookbook.py --weekly \\
+      --profile ~/agent-workspace/profile.md
+
+  # Event-driven (auto-scored — exits silently on hard-veto medical/therapy)
+  python3 scripts/run-headless-lookbook.py --event ~/Downloads/event.json \\
+      --profile ~/agent-workspace/profile.md
+
+  # Premium tier weekly — pauses for the agent to drop look images
+  python3 scripts/run-headless-lookbook.py --weekly \\
+      --profile ~/agent-workspace/profile.md --tier premium
+
+  # Resume after dropping the gpt-image-2 PNGs + marker into runs/<id>/looks/
+  python3 scripts/run-headless-lookbook.py --weekly \\
+      --profile ~/agent-workspace/profile.md --tier premium --resume-build
+
+Cross-references:
+  references/headless-mode.md      — when this orchestrator runs, defaults,
+                                      run-summary format, the 5 hard rules
+  references/event-suitability.md  — calendar event scoring rubric (event mode)
+  references/run-layout.md         — per-lookbook directory isolation rules
+  scripts/build-html-lookbook.py --help
+  scripts/deploy-lookbook.sh --help
+  scripts/validate-lookbook.py --help
+"""
+
+ap = argparse.ArgumentParser(
+    description="Headless lookbook orchestrator. Composes score (event mode) → "
+                "discover → curate → build → deploy → validate → wishlist append "
+                "→ run summary. Designed to be safe under cron / /loop / voice.",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    epilog=EPILOG,
+)
 mode = ap.add_mutually_exclusive_group(required=True)
-mode.add_argument("--weekly", action="store_true", help="Weekly newsletter mode.")
-mode.add_argument("--event",  type=pathlib.Path, help="Event JSON (reads via scripts/score-calendar-event.py).")
-ap.add_argument("--profile",     type=pathlib.Path, required=True)
-ap.add_argument("--runs-dir",    type=pathlib.Path, default=pathlib.Path.home() / ".buck-mason-stylist/runs")
-ap.add_argument("--wishlist",    type=pathlib.Path, default=pathlib.Path.home() / ".buck-mason-stylist/wishlist.jsonl")
-ap.add_argument("--max-pieces",  type=int, default=6)
-ap.add_argument("--tier",        choices=["auto", "editorial", "premium"], default="auto")
-ap.add_argument("--resume-build",action="store_true", help="Skip discover/curate; re-build from existing run dir. Use after dropping look images for Premium tier.")
-ap.add_argument("--lookbook-id", type=str, help="Override the auto-derived lookbook_id.")
+mode.add_argument("--weekly", action="store_true",
+                  help="Weekly newsletter mode — discovers recently-live + "
+                       "previously-unproposed products, dedupes against the "
+                       "wishlist, builds 1-2 looks. See references/headless-mode.md.")
+mode.add_argument("--event",  type=pathlib.Path,
+                  help="Event JSON file. Scored via scripts/score-calendar-event.py; "
+                       "skip / soft-surface / editorial / premium per the rubric "
+                       "in references/event-suitability.md.")
+ap.add_argument("--profile",     type=pathlib.Path, required=True,
+                help="Path to the customer's profile.md. Reads gender, sizes, "
+                     "style_ethos, link_payment_method, preferred_lookbook_host*, "
+                     "weekly_lookbook_*, lookbook_project_prefix, notify_url, "
+                     "reference_photos.")
+ap.add_argument("--runs-dir",    type=pathlib.Path,
+                default=pathlib.Path.home() / ".buck-mason-stylist/runs",
+                help="Where per-lookbook run directories live "
+                     "(default: ~/.buck-mason-stylist/runs/).")
+ap.add_argument("--wishlist",    type=pathlib.Path,
+                default=pathlib.Path.home() / ".buck-mason-stylist/wishlist.jsonl",
+                help="Long-term JSONL of every piece ever proposed/purchased. "
+                     "Read for dedup; appended-to after a successful deploy "
+                     "(default: ~/.buck-mason-stylist/wishlist.jsonl).")
+ap.add_argument("--max-pieces",  type=int, default=6,
+                help="Cap on the number of pieces in the lookbook (default: 6).")
+ap.add_argument("--tier",        choices=["auto", "editorial", "premium"], default="auto",
+                help="auto = Premium when event scores ≥9 + OPENAI_API_KEY + "
+                     "≥2 reference photos, else Editorial. editorial = no AI "
+                     "try-on (fast, cheap, recommended for recurring runs). "
+                     "premium = gpt-image-2 try-on per look (~$0.40/run).")
+ap.add_argument("--resume-build",action="store_true",
+                help="Skip discover/curate; re-enter the build step using the "
+                     "existing run directory. Pair with --tier premium after "
+                     "dropping gpt-image-2 PNGs into runs/<id>/looks/.")
+ap.add_argument("--lookbook-id", type=str,
+                help="Override the auto-derived lookbook_id. Default: weekly = "
+                     "<YYYY>-weekly-<ISO_week>; event = <YYYY-MM-DD>-<title-slug>.")
 args = ap.parse_args()
 
 args.runs_dir.mkdir(parents=True, exist_ok=True)
