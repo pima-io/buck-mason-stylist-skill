@@ -46,10 +46,93 @@ step with the run config + picks ready, and the agent generates the look
 images separately, drops them into runs/<id>/looks/, then re-runs the
 orchestrator with --resume-build to pick up at the build stage.
 """
-import argparse, json, os, pathlib, re, subprocess, sys, time, urllib.parse
+import argparse, atexit, contextlib, json, os, pathlib, re, subprocess, sys, time, urllib.parse
 
 ROOT = pathlib.Path(__file__).resolve().parent
 SKILL_ROOT = ROOT.parent
+
+# ── Timing log ──────────────────────────────────────────────────────────────
+# Phase-level timings written to <run_dir>/_timings.jsonl (machine, per-phase
+# JSON line) and <run_dir>/_run.log (human-readable, sorted-by-duration). On
+# any exit path the log is flushed via atexit so we keep a record of slow or
+# failed runs. Top-3 slowest phases also print to stderr at end so cron-like
+# environments capture the signal in their job-runner output.
+
+class TimingLog:
+    def __init__(self):
+        self.run_dir = None      # set after we know lookbook_id
+        self.entries = []
+        self.t_start = time.time()
+
+    @contextlib.contextmanager
+    def phase(self, name, **meta):
+        t0 = time.time()
+        ok = True
+        err = None
+        try:
+            yield
+        except SystemExit:
+            # Treat sys.exit(N) inside a phase as ok=False if N != 0,
+            # but still record the duration before re-raising.
+            if sys.exc_info()[1].code not in (None, 0):
+                ok = False
+                err = f"sys.exit({sys.exc_info()[1].code})"
+            raise
+        except Exception as e:
+            ok = False
+            err = f"{type(e).__name__}: {str(e)[:200]}"
+            raise
+        finally:
+            t1 = time.time()
+            entry = {
+                "phase":      name,
+                "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0)),
+                "duration_s": round(t1 - t0, 2),
+                "ok":         ok,
+                **{k: v for k, v in meta.items() if v is not None},
+            }
+            if err:
+                entry["error"] = err
+            self.entries.append(entry)
+
+    def write(self):
+        if not self.run_dir or not self.entries:
+            return
+        try:
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+            (self.run_dir / "_timings.jsonl").write_text(
+                "\n".join(json.dumps(e) for e in self.entries) + "\n"
+            )
+            total = time.time() - self.t_start
+            lines = [
+                f"# Run timings — {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(self.t_start))}",
+                f"# Total elapsed: {total:.2f}s",
+                f"# Phase order (chronological):",
+            ]
+            for e in self.entries:
+                pct = (e["duration_s"] / total * 100) if total > 0 else 0.0
+                mark = "✓" if e["ok"] else "✗"
+                extra = f"  {e.get('error', '')}" if not e["ok"] else ""
+                lines.append(f"  {mark} {e['duration_s']:>7.2f}s ({pct:>5.1f}%)  {e['phase']}{extra}")
+            lines.append("")
+            lines.append("# Slowest phases (by duration):")
+            for e in sorted(self.entries, key=lambda x: x["duration_s"], reverse=True)[:5]:
+                lines.append(f"    {e['duration_s']:>7.2f}s  {e['phase']}")
+            (self.run_dir / "_run.log").write_text("\n".join(lines) + "\n")
+        except Exception as e:
+            print(f"warn: failed to write timings log: {e}", file=sys.stderr)
+
+    def print_summary_to_stderr(self):
+        if not self.entries:
+            return
+        total = time.time() - self.t_start
+        top3 = sorted(self.entries, key=lambda x: x["duration_s"], reverse=True)[:3]
+        msg = " | ".join(f"{e['phase']} {e['duration_s']:.1f}s" for e in top3)
+        print(f"[timings] total {total:.1f}s · slowest: {msg}", file=sys.stderr)
+
+timings = TimingLog()
+atexit.register(timings.write)
+atexit.register(timings.print_summary_to_stderr)
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
 EPILOG = """\
@@ -84,6 +167,20 @@ Premium-tier face-verification gate:
   failed and the rubric reason. Override with --no-verify (not
   recommended). See references/image-generation.md § "Face
   verification gate".
+
+Per-run logging (always written to the run dir):
+  _timings.jsonl   one JSON line per phase (machine-readable, append
+                   across runs to track timing distribution over time).
+                   Fields: phase, started_at, duration_s, ok, error?,
+                   plus per-phase metadata (tier, project, look, ...).
+  _run.log         human-readable trace: chronological phase list with
+                   ✓/✗ + duration + percent-of-total, then a "Slowest
+                   phases (by duration)" bottom block. Inspect this
+                   first when a run takes longer than expected.
+
+  At end-of-run, the orchestrator also prints a one-line "[timings]
+  total Xs · slowest: A Ys | B Ys | C Ys" to stderr so cron/loop
+  invocations capture the signal in their job-runner output.
 
 Examples:
   # Weekly newsletter (Editorial tier; honors profile gate for deploy)
@@ -207,7 +304,8 @@ def parse_profile(path: pathlib.Path) -> dict:
         out["sizes"] = sizes
     return out
 
-profile = parse_profile(args.profile)
+with timings.phase("parse_profile", path=str(args.profile)):
+    profile = parse_profile(args.profile)
 gender               = profile.get("gender", "u")
 sizes                = profile.get("sizes", {})
 ethos                = profile.get("style_ethos", "")
@@ -248,11 +346,12 @@ if args.event:
     if not args.event.exists():
         print(f"error: event file not found: {args.event}", file=sys.stderr)
         sys.exit(2)
-    score_p = subprocess.run(
-        ["python3", str(ROOT / "score-calendar-event.py")],
-        input=args.event.read_text(),
-        capture_output=True, text=True,
-    )
+    with timings.phase("score_event"):
+        score_p = subprocess.run(
+            ["python3", str(ROOT / "score-calendar-event.py")],
+            input=args.event.read_text(),
+            capture_output=True, text=True,
+        )
     if score_p.returncode != 0:
         print(f"error: scorer exited non-zero: {score_p.stderr}", file=sys.stderr)
         sys.exit(2)
@@ -285,6 +384,7 @@ else:
 run_dir = args.runs_dir / lookbook_id
 (run_dir / "looks").mkdir(parents=True, exist_ok=True)
 (run_dir / "deploy").mkdir(parents=True, exist_ok=True)
+timings.run_dir = run_dir   # connect the log to its destination now that we know it
 
 # ── Curate (skipped on --resume-build) ─────────────────────────────────────
 picks_path  = run_dir / "picks.json"
@@ -302,14 +402,15 @@ if not args.resume_build:
     # ── Discover candidates ────────────────────────────────────────────────
     if args.weekly:
         sizes_arg = json.dumps({k: str(v) for k, v in sizes.items() if v})
-        disc_p = subprocess.run([
-            "python3", str(ROOT / "discover-weekly-candidates.py"),
-            "--gender", str(gender),
-            "--since-days", "30",
-            "--wishlist", str(args.wishlist),
-            "--sizes", sizes_arg,
-            "--max", str(max(args.max_pieces * 3, 18)),
-        ], capture_output=True, text=True)
+        with timings.phase("discover_candidates", source="weekly"):
+            disc_p = subprocess.run([
+                "python3", str(ROOT / "discover-weekly-candidates.py"),
+                "--gender", str(gender),
+                "--since-days", "30",
+                "--wishlist", str(args.wishlist),
+                "--sizes", sizes_arg,
+                "--max", str(max(args.max_pieces * 3, 18)),
+            ], capture_output=True, text=True)
         if disc_p.returncode != 0:
             fail(run_dir, "discover", f"discover-weekly-candidates failed: {disc_p.stderr.strip()[:200]}")
         cand = json.loads(disc_p.stdout)
@@ -321,14 +422,15 @@ if not args.resume_build:
         # we fall back to the same discover script with the event's gender.
         if not picks_path.exists():
             sizes_arg = json.dumps({k: str(v) for k, v in sizes.items() if v})
-            disc_p = subprocess.run([
-                "python3", str(ROOT / "discover-weekly-candidates.py"),
-                "--gender", str(gender),
-                "--since-days", "60",
-                "--wishlist", str(args.wishlist),
-                "--sizes", sizes_arg,
-                "--max", str(max(args.max_pieces * 3, 18)),
-            ], capture_output=True, text=True)
+            with timings.phase("discover_candidates", source="event"):
+                disc_p = subprocess.run([
+                    "python3", str(ROOT / "discover-weekly-candidates.py"),
+                    "--gender", str(gender),
+                    "--since-days", "60",
+                    "--wishlist", str(args.wishlist),
+                    "--sizes", sizes_arg,
+                    "--max", str(max(args.max_pieces * 3, 18)),
+                ], capture_output=True, text=True)
             if disc_p.returncode != 0:
                 fail(run_dir, "discover", f"discover-weekly-candidates failed: {disc_p.stderr.strip()[:200]}")
             cand = json.loads(disc_p.stdout)
@@ -432,12 +534,13 @@ if tier == "premium":
     if not args.no_verify and reference_photos and openai_key_set:
         verify_failures = []
         for png in sorted(looks_dir.glob("look*.png")):
-            v = subprocess.run(
-                ["python3", str(ROOT / "verify-face.py"),
-                 "--generated", str(png),
-                 *sum([["--reference", rp] for rp in reference_photos], [])],
-                capture_output=True, text=True,
-            )
+            with timings.phase("verify_face", look=png.name):
+                v = subprocess.run(
+                    ["python3", str(ROOT / "verify-face.py"),
+                     "--generated", str(png),
+                     *sum([["--reference", rp] for rp in reference_photos], [])],
+                    capture_output=True, text=True,
+                )
             if v.returncode == 1:
                 # Try to surface the rubric reason from the JSON
                 try:
@@ -480,15 +583,17 @@ if tier == "premium":
 else:
     build_args += ["--no-tryon"]
 
-build_p = subprocess.run(build_args, capture_output=True, text=True)
+with timings.phase("build", tier=tier):
+    build_p = subprocess.run(build_args, capture_output=True, text=True)
 if build_p.returncode != 0:
     fail(run_dir, "build", f"build-html-lookbook.py exit {build_p.returncode}: {build_p.stderr.strip()[:400]}", tier=tier)
 
 # ── Validate (local) ───────────────────────────────────────────────────────
-validate_p = subprocess.run(
-    ["python3", str(ROOT / "validate-lookbook.py"), "--dir", str(deploy_dir)],
-    capture_output=True, text=True,
-)
+with timings.phase("validate_local"):
+    validate_p = subprocess.run(
+        ["python3", str(ROOT / "validate-lookbook.py"), "--dir", str(deploy_dir)],
+        capture_output=True, text=True,
+    )
 if validate_p.returncode != 0:
     fail(run_dir, "validate-local", f"local validation failed: {validate_p.stdout.strip()[-400:]}", tier=tier)
 
@@ -514,36 +619,39 @@ if not auto_publish:
     write_summary(run_dir, body)
     sys.exit(0)
 
-deploy_p = subprocess.run(
-    ["bash", str(ROOT / "deploy-lookbook.sh"), str(deploy_dir), project_name, "--auto", "--no-overwrite"],
-    capture_output=True, text=True,
-)
+with timings.phase("deploy", project=project_name):
+    deploy_p = subprocess.run(
+        ["bash", str(ROOT / "deploy-lookbook.sh"), str(deploy_dir), project_name, "--auto", "--no-overwrite"],
+        capture_output=True, text=True,
+    )
 if deploy_p.returncode != 0:
     fail(run_dir, "deploy", f"deploy-lookbook.sh exit {deploy_p.returncode}: {deploy_p.stderr.strip()[-400:]}", tier=tier)
 
 # ── Validate (deployed) ───────────────────────────────────────────────────
-validate_d = subprocess.run(
-    ["python3", str(ROOT / "validate-lookbook.py"), "--url", page_url],
-    capture_output=True, text=True,
-)
+with timings.phase("validate_deployed"):
+    validate_d = subprocess.run(
+        ["python3", str(ROOT / "validate-lookbook.py"), "--url", page_url],
+        capture_output=True, text=True,
+    )
 if validate_d.returncode != 0:
     fail(run_dir, "validate-deployed", f"deployed validation failed: {validate_d.stdout.strip()[-400:]}", tier=tier)
 
 # ── Wishlist append ───────────────────────────────────────────────────────
-proposed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-with args.wishlist.open("a") as f:
-    for p in json.loads(picks_path.read_text()):
-        f.write(json.dumps({
-            "sku":           p.get("sku"),
-            "name":          p.get("name"),
-            "size":          p.get("picked_size") or p.get("size"),
-            "qty":           1,
-            "lookbook_id":   lookbook_id,
-            "lookbook_url":  page_url,
-            "proposed_at":   proposed_at,
-            "purchased_at":  None,
-            "order_id":      None,
-        }) + "\n")
+with timings.phase("wishlist_append"):
+    proposed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    with args.wishlist.open("a") as f:
+        for p in json.loads(picks_path.read_text()):
+            f.write(json.dumps({
+                "sku":           p.get("sku"),
+                "name":          p.get("name"),
+                "size":          p.get("picked_size") or p.get("size"),
+                "qty":           1,
+                "lookbook_id":   lookbook_id,
+                "lookbook_url":  page_url,
+                "proposed_at":   proposed_at,
+                "purchased_at":  None,
+                "order_id":      None,
+            }) + "\n")
 
 # ── Success summary ───────────────────────────────────────────────────────
 cfg  = json.loads(config_path.read_text())

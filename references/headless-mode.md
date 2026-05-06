@@ -203,6 +203,52 @@ The run summary (per § "The run summary format" above) reports the URL, the cou
 - `off` disables the recurring lookbook entirely; the agent still runs event-driven (calendar) lookbooks per `references/event-suitability.md`.
 - The first weekly run after install is the "welcome" lookbook — it can use the entire `/recommend` capsule (not just recently-live), since the customer has no wishlist history yet.
 
+## Per-run dev logging
+
+Every orchestrator run writes two timing artifacts to its run directory:
+
+```
+~/.buck-mason-stylist/runs/<lookbook_id>/
+├── _timings.jsonl    one JSON line per phase, machine-readable
+└── _run.log          human-readable chronological trace + slowest-phases summary
+```
+
+Plus a one-line stderr summary at end-of-run:
+
+```
+[timings] total 15.9s · slowest: discover_candidates 10.2s | build 5.7s | validate_local 0.0s
+```
+
+### What gets timed
+
+| Phase | What's measured | Typical range |
+|---|---|---|
+| `parse_profile` | YAML/markdown parse of `profile.md` | <0.1s |
+| `score_event` (event mode only) | `scripts/score-calendar-event.py` regex pass | <0.1s |
+| `discover_candidates` | `scripts/discover-weekly-candidates.py` — MCP `/products?recently_live` + backfill + per-candidate `/products/<id>` detail calls | 5–30s (depends on candidate count and MCP latency) |
+| `build` | `scripts/build-html-lookbook.py` — thumbnail downloads (curl per piece) + og.jpg generation + HTML render | 3–10s |
+| `verify_face` (Premium tier only, per look) | `scripts/verify-face.py` — GPT-4o-vision call | 5–15s per look |
+| `validate_local` | `scripts/validate-lookbook.py --dir` | <0.1s |
+| `deploy` (when `_auto: true`) | `scripts/deploy-lookbook.sh` — wrangler probe + (idempotent) project create + upload + post-deploy validate | 10–30s |
+| `validate_deployed` | `scripts/validate-lookbook.py --url` (D1–D6 checks) | 2–5s |
+| `wishlist_append` | JSONL append to `~/.buck-mason-stylist/wishlist.jsonl` | <0.1s |
+
+### When to look at the log
+
+- **Run took longer than expected** — check `_run.log`. Top-3 slowest phases are at the bottom; the chronological list is in the middle.
+- **Phase consistently slow** — grep across many runs:
+  ```bash
+  jq -s 'map(select(.phase == "discover_candidates")) | sort_by(.duration_s) | reverse | .[0:5]' \
+    ~/.buck-mason-stylist/runs/*/​_timings.jsonl
+  ```
+- **Phase failed** — entries with `"ok": false` carry an `error` field with the exception class + first 200 chars. Same data shows in `_run.log` with a `✗` mark.
+
+### What's NOT in the orchestrator's timing
+
+- **`gpt-image-2` generation for Premium-tier runs.** That call lives outside the deterministic chain — the agent makes it between the first orchestrator pass (which exits with `READY_FOR_PREMIUM_IMAGE_STEP`) and the second pass (which resumes via `--resume-build`). If a "full Premium run" feels like 5+ minutes, the time is likely there: gpt-image-2 high-quality 1024×1536 takes ~30–60s per look × 2 looks = 1–2 minutes, plus the `verify_face` overhead (10–30s for two looks). The orchestrator's `_run.log` only spans the orchestrator's portion of work.
+- **Wrangler interactive prompts.** First-time `wrangler login` for a fresh machine isn't timed (it's outside the orchestrator).
+- **Per-candidate MCP `/products/<id>` calls** inside `discover_candidates` — currently rolled up into the parent phase. If `discover_candidates` is the bottleneck, the next instrumentation level is to add timings inside `discover-weekly-candidates.py` itself.
+
 ## What headless mode does NOT do
 
 - **Doesn't run MPP checkout autonomously.** Even with `_auto: true`, MPP requires the customer's push-approval in their Link app — that's the consent step. A scheduled run produces a lookbook + handoff prose, but checkout always waits for the customer.
