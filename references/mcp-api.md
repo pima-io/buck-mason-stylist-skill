@@ -71,11 +71,14 @@ Response:
 
 ## `GET /mcp/products/:id`
 
-Single product by `slug`, `code`, or numeric id.
+Single product. **`:id` is matched against the literal `code` field or the numeric `id`** — not the `slug`.
 
 ```
-GET /mcp/<company_slug>/products/daily-shirt-olive?near_zip=94110&radius_mi=25
+GET /mcp/<company_slug>/products/10543?near_zip=94110&radius_mi=25      ← preferred (always works)
+GET /mcp/<company_slug>/products/Daily-Shirt-Olive?near_zip=94110&radius_mi=25   ← if you know the literal code
 ```
+
+> **Quirk verified 2026-05-09 against `pima-master`.** The `code` field is **inconsistently cased across the catalog** — some products have `Title-Case-Hyphen` (`Natural-Draped-Linen-Deuce-Coupe-Camp-Shirt`), others have `lowercase-hyphen` (`heather-oat-field-spec-cotton-heavy-tee`). The lookup is exact-string only. The `slug` field (which is always lowercase-hyphen and is what's in the storefront URL) is **not** an accepted lookup key, even though earlier docs implied it was. **Always look up by numeric `id`** — get it from the `products` list response and use it for every subsequent detail/imagery call.
 
 Response is the summary plus:
 
@@ -85,10 +88,15 @@ Response is the summary plus:
 
 ```json
 {
-  "sku": "DAILY-OLIVE-L",
+  "sku": "BM13211.679NATL",
   "size": "L",
   "shopify_variant_id": "gid://shopify/ProductVariant/9999",
-  "online_count": 12,
+  "online": {
+    "in_stock": true,
+    "status": "in_stock",        // in_stock | low_stock | out_of_stock
+    "label": "In stock",         // human-readable, ready to surface
+    "count": 7                   // present only on low_stock
+  },
   "locations": [
     { "id": 7, "name": "Hayes Valley", "distance_mi": 0.8,
       "pickup_enabled": true, "in_stock": true, "count": 4,
@@ -96,6 +104,39 @@ Response is the summary plus:
   ]
 }
 ```
+
+> **`variants[].online` is a structured object, not an integer.** Earlier shipped docs called it `online_count` and treated it as a plain count — confirmed against the live response on 2026-05-09 it's now `{ in_stock, status, label, count? }`. Render the `label` directly to the customer (it's pre-bucketed: "In stock" / "Low stock (N left)" / "Out of stock") and avoid re-deriving the bucket from a count that may not exist.
+
+## `GET /mcp/products/:id/imagery`
+
+Image URLs categorized by role for image-gen pipelines (workflow #3 in `SKILL.md`). Same `:id` rules as `/products/:id` — pass the numeric `id`.
+
+```
+GET /mcp/<company_slug>/products/10543/imagery
+```
+
+```json
+{
+  "product_id": 10543,
+  "product_slug": "natural-draped-linen-deuce-coupe-camp-shirt",
+  "product_name": "Natural Draped Linen Deuce Coupe Camp Shirt",
+  "product_url": "https://www.buckmason.com/products/natural-draped-linen-deuce-coupe-camp-shirt",
+  "try_on":          { "url": "...", "type": "shopify", "position": 2, "alt": "..." }, // OR null
+  "try_on_is_flat":  true,                                                              // boolean
+  "try_on_warning":  null,                                                              // string when try_on missing
+  "hero":            { "url": "...", "type": "shopify", "position": 1, "alt": "..." },
+  "detail":          [ { "url": "...", "type": "shopify", "position": 3, ... }, ... ],
+  "all":             [ ...every image, ordered ... ]
+}
+```
+
+Field semantics:
+- **`try_on`** — Pima's pick for "best image to feed an image-edit / try-on pipeline." Will be a flat-lay where one exists; otherwise the cleanest model-on-body shot the heuristic can find; otherwise `null`.
+- **`try_on_is_flat`** — `true` only when the `try_on` URL points to a true flat-lay. When `false` (and `try_on` non-null), the agent passing it to gpt-image-2 must add a directive instructing the model to isolate the garment from the original wearer ("use ONLY the garment, ignore the original model's body, pose, and any background").
+- **`try_on_warning`** — present when `try_on` is `null`; explains why and recommends behavior. As of 2026-05-09 the canonical message is *"no safe try-on image available — only on-model editorial shots exist; downstream agents should crop to garment region or skip try-on for this product."*
+- **`hero`** — first product image (typically the most polished marketing shot).
+- **`detail`** — additional images in carousel order.
+- **`all`** — every image, ordered by `position`. Use when the agent needs to scan for a specific angle.
 
 ## `GET /mcp/stock/:sku`
 

@@ -1,7 +1,7 @@
 {
   "name": "buck-mason-stylist-skill",
   "namespace": "nickmerwin",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "visibility": "public",
   "description": "Personal shopping skill for Buck Mason — stock checks, wardrobe gap analysis, AI try-on lookbooks (gpt-image-2), and one-shot cart + checkout (browser link or fully agent-driven via MPP + stripe/link-cli). Talks to the pima.io MCP at /mcp/buckmason/*.",
   "homepage": "https://github.com/pima-io/buck-mason-stylist-skill",
@@ -48,7 +48,8 @@
       {"path": "<workspace>/profile.md", "mode": "read"},
       {"path": "<workspace>/wardrobe.md", "mode": "read"},
       {"path": "<workspace>/events.md", "mode": "read"},
-      {"path": "<workspace>/lookbook/", "mode": "write", "purpose": "Generated lookbook PNG/PPTX/HTML output"}
+      {"path": "<workspace>/lookbook/", "mode": "write", "purpose": "Generated lookbook PNG/PPTX/HTML output"},
+      {"path": "~/.buck-mason-stylist/wishlist.jsonl", "mode": "read-write", "purpose": "Cross-session wishlist + purchase history. Appended after html-cart handoff selections and successful MPP orders so the agent has continuity across sessions. JSONL, append-only; contains slug + size + qty + lookbook_id + order_id + timestamps. No card data, no shipping address, no email."}
     ]
   }
 }

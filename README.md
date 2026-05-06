@@ -67,7 +67,9 @@ See `examples/stock-check.md` and `examples/lookbook.md` for full walkthroughs.
 | `references/image-generation.md` | OpenAI image-gen prompt cookbook + gpt-image-2 hint inventory |
 | `references/seasons.md` | Season + region + heat-type mapping |
 | `references/style-reasoning.md` | Climate matrix, formality scale, classic-vs-trend filter |
-| `references/output-formats.md` | Lookbook output: `images` / `ppt` / `html` builders + quickest-host options |
+| `references/output-formats.md` | Lookbook output: `images` / `ppt` / `html` / `html-cart` builders + quickest-host options |
+| `references/brand-style.md` | Buck Mason visual style guide (fonts, colors, button shape, image ratios) extracted from buckmason.com — used by every rendered lookbook builder |
+| `references/hosting-options.md` | Capability-aware menu of hosts for the HTML lookbook — probe script + ranked transports (Cloudflare Pages → Netlify → Vercel → Surge → Gist → S3 → 0x0.st) |
 | `references/mpp.md` | Merchant Payments Protocol checkout (mpp.dev + stripe/link-cli) — fully agent-driven transactions via HTTP 402 + Stripe Shared Payment Token |
 | `templates/*.example.md` | Copy these into your workspace |
 | `examples/*.md` | End-to-end walkthroughs |

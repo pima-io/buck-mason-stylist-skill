@@ -10,6 +10,7 @@ Copy this file into your agent's persistent workspace as `profile.md` and fill i
 - pima_api_key: pkLOMQfU1qM        # Buck Mason public Pima API key — required on every /api/* call (order tracking, returns). Not needed for /mcp/* (which is path-tenanted).
 - pima_account_linked: false       # set true if you've logged in via /api/login_via_token (only needed for account/checkout/return flows)
 - jwt: null                         # don't fill manually; agent stores after login_via_token returns
+- link_payment_method: unconfirmed # unconfirmed / confirmed / none. Confirms a Stripe Link wallet with a linked payment method exists on the customer's phone. Required for MPP fully-agent-driven checkout (workflow #4 path B). When `confirmed`, the lookbook workflow defaults to the interactive `html-cart` format and the cart handoff routes through MPP; when `none` or `unconfirmed`, lookbooks default to `ppt` and purchases default to the Shopify cart-link path. Set up Link at https://link.com or in any Stripe checkout flow.
 
 ## Build (required for image-gen fidelity)
 

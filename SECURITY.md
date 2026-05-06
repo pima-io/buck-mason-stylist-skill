@@ -37,9 +37,12 @@ GitHub issue.
 | `profile.md` (email) | Customer's own inbox via Pima | Workflow #5c (magic-link, opt-in only) | Email is delivered by Pima to the customer; the agent never sees it unless an explicit email-MCP is authorized in the same turn. |
 | Shopify cart permalink | Customer's browser | Workflow #4 default | URL only; the customer takes it from there. |
 | `wardrobe.md`, `events.md` | Local filesystem only | All workflows that read them | Never sent to any external service. |
+| `html-cart` selection block (slug + size + qty + lookbook_id) | `~/.buck-mason-stylist/wishlist.jsonl` (local filesystem) | Workflow #4 path B on handoff paste-back and on successful MPP order | Append-only JSONL. Contains slug, size, qty, `lookbook_id`, `price_cents_at_pick`, and (after settlement) `order_id` + `purchased_at`. No card data, no shipping address, no email, no full name. Lives outside the workspace so it persists across agent sessions on the same machine — declared in `clawhub.json#permissions.filesystem`. |
 
 Nothing in this skill writes to anywhere outside the operator's workspace
-except the four hosts listed in `clawhub.json#permissions.network`.
+or the wishlist path declared in `clawhub.json#permissions.filesystem`,
+and never to any host outside the four listed in
+`clawhub.json#permissions.network`.
 
 ## Threat model
 

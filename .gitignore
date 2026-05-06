@@ -16,3 +16,6 @@ __pycache__/
 # Local secrets / dev env
 .env
 .env.local
+
+# Wrangler (Cloudflare Pages) local cache + state — created by `wrangler pages deploy`
+.wrangler/
