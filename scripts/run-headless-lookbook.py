@@ -297,18 +297,29 @@ if tier == "premium":
     # Verify we actually have the per-look images + the marker
     pngs = sorted(looks_dir.glob("look*.png"))
     if not pngs:
-        # Premium path needs the agent to drop look images first;
-        # signal that explicitly and stop short of build.
+        # Premium path needs the agent to drop look images first.
+        # Use an unmistakable machine-readable marker on stdout + a structured
+        # heading in the summary so an agent (or another script) can branch
+        # on the run state without parsing prose.
         body = (
+            f"READY_FOR_PREMIUM_IMAGE_STEP\n"
+            f"\n"
             f"# Lookbook run — {today}\n"
             f"\n"
-            f"⏸  HOLD: Premium tier needs gpt-image-2 outputs at:\n"
-            f"   {looks_dir}/look1.png\n"
-            f"   {looks_dir}/look2.png\n"
-            f"   {looks_dir}/.lookbook_id  (contains: {lookbook_id})\n"
+            f"Status: READY_FOR_PREMIUM_IMAGE_STEP\n"
+            f"Tier:   premium\n"
+            f"Stage:  awaiting-look-images\n"
             f"\n"
-            f"After dropping the look images, re-run with --resume-build.\n"
-            f"Or fall back to Editorial with --tier editorial.\n"
+            f"Premium tier needs gpt-image-2 outputs at:\n"
+            f"  {looks_dir}/look1.png\n"
+            f"  {looks_dir}/look2.png\n"
+            f"  {looks_dir}/.lookbook_id  (must contain: {lookbook_id})\n"
+            f"\n"
+            f"Next steps (pick ONE):\n"
+            f"  (a) Generate the try-on images per references/image-generation.md,\n"
+            f"      drop them at the paths above, write the .lookbook_id marker,\n"
+            f"      then re-run this orchestrator with --resume-build.\n"
+            f"  (b) Fall back to Editorial tier (no AI try-on) with --tier editorial.\n"
             f"\n"
             f"Run dir: {run_dir}\n"
         )

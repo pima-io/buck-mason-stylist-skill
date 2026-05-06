@@ -94,6 +94,12 @@ Listing: <https://clawhub.ai/nickmerwin/buck-mason-stylist-skill>
 
 ```bash
 clawhub install nickmerwin/buck-mason-stylist-skill
+
+# Some ClawHub install paths strip the executable bit on unpack — restore it
+# once after installing so the bundled scripts can run directly. (The skill's
+# own command examples all use explicit `bash` / `python3` prefixes that
+# work regardless, so this step is optional but tidier.)
+chmod +x ~/.clawhub/skills/buck-mason-stylist-skill/scripts/*
 ```
 
 ## License

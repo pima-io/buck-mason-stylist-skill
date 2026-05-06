@@ -1,7 +1,7 @@
 ---
 name: buck-mason-stylist
 description: Personal shopping skill for Buck Mason. Stock-checks (online + nearby store), wardrobe gap analysis, season- and event-aware outfit suggestions, AI try-on lookbooks, and one-shot cart + checkout. Customer brings sizes once; the agent reuses them across requests.
-version: 0.3.1
+version: 0.3.2
 license: MIT
 authors:
   - Buck Mason / Pima
@@ -12,18 +12,19 @@ compatibility:
 metadata:
   openclaw:
     requires:
-      env: [OPENAI_API_KEY]
       binaries: [curl, jq]
       python: [python-pptx, Pillow]
+      optional_env: [OPENAI_API_KEY]
       optional_binaries: [magick]
       optional_clis: ["@stripe/link-cli"]
     env_details:
       OPENAI_API_KEY:
-        required: true
-        purpose: "Used only for the AI try-on lookbook flow (workflow #3). The skill calls OpenAI's /v1/images/edits with model gpt-image-2. Stock checks, recommendations, cart/checkout, and order tracking do NOT require this key."
+        required: false
+        conditional: "Premium-tier lookbook generation only (workflow #3's gpt-image-2 try-on imagery). The skill degrades gracefully — Editorial tier (product-imagery layout) and Minimum tier (text + links + stock) work with NO key set. Stock checks, recommend, cart, MPP checkout, and order tracking are all unaffected by absence."
+        purpose: "OpenAI /v1/images/edits with model gpt-image-2 for AI try-on imagery."
         format: "OpenAI API secret key, prefix sk-..."
         obtain_url: "https://platform.openai.com/api-keys"
-        notes: "The OpenAI organization must be verified for gpt-image-2 access. Unverified orgs get 403 from /v1/images/edits; the skill surfaces that as an actionable error rather than silently downgrading. See https://help.openai.com/en/articles/10910291."
+        notes: "The OpenAI organization must be verified for gpt-image-2 access. Unverified orgs get 403 from /v1/images/edits; the skill surfaces that as an actionable error and falls through to Editorial tier rather than silently downgrading. See https://help.openai.com/en/articles/10910291."
         how_to_set: "export OPENAI_API_KEY=sk-..."
     optional_cli_details:
       "@stripe/link-cli":
@@ -200,16 +201,7 @@ Two routes; pick by customer intent + capability. **Always read the order total 
 | **A — Shopify cart-link** *(default)* | Customer is happy paying in their own browser | `references/cart-rules.md` (body shape, pickup edge cases, no-silent-substitution, error envelope) |
 | **B — MPP fully-agent-driven** | `profile.md → link_payment_method: confirmed` AND runtime has `@stripe/link-cli` | `references/mpp.md` (two-phase HTTP 402 + Stripe SPT lifecycle, on-paste-back handler from the `html-cart` prose, idempotency, total-mismatch guard, coupon/credit envelope, worked transcript) |
 
-Read the relevant reference before invoking. Don't reconstruct either contract from this paragraph.
-
-   **Lookbook-driven entry point.** The most common way the customer enters this path is by pasting (or speaking) back the **plain-prose handoff** emitted by an `html-cart` lookbook (workflow #3 step 4). Format: a short paragraph naming the lookbook + bulleted items with sizes. Voice flows skip the paste step entirely — the customer just says "from the LA Mellow Weekend lookbook, I want the camp shirt in L and the chinos in 31" — same vocabulary, same handler. On receiving the handoff (text or speech):
-   1. **Detect the handoff.** Heuristics: text mentions a Buck Mason lookbook context (e.g., starts with `Buck Mason — <title>` or refers to "the lookbook") and lists items with sizes. The customer might trim the paragraph or speak a fragment ("the camp shirt and the chinos") — accept either. Don't require a rigid envelope; if the message looks plausibly like a stylist handoff, proceed and confirm at the summary step.
-   2. **Resolve each item by name.** For each line, search `GET /mcp/buckmason/products?gender=<m|w>&q=<distinctive substring>` (`q` is exact-substring per `references/mcp-api.md`, so prefer short distinctive phrases — "Deuce Coupe Camp Shirt" beats the full product name), then `GET /products/<id>` and pick the variant matching the stated size. If the agent still has the conversation context that generated the lookbook, "the camp shirt" maps unambiguously to the rendered Look 01 piece — no MCP search needed. Resolve from `~/.buck-mason-stylist/wishlist.jsonl` if the agent was started fresh in a new session and the prose carries a `lookbook_id`-style date+title line.
-   3. **Disambiguate when needed.** If a name resolves to multiple products (rare on Buck Mason's catalog), ask the customer one question naming the candidates — never silently pick.
-   4. **Gather the rest conversationally — one round trip, defaults assumed.** Default: ship to `profile.md → shipping`, no coupon, apply all available customer credit. Restate as: *"Shipping to <street>, no coupon, applying $X in credit. Anything to change?"* Accept either "go ahead" or a one-line correction (`pickup at Abbot Kinney`, `code SPRING25`, `skip credit`).
-   5. **Spot price drift.** The prose carries a "Subtotal at pick" line. If the phase-1 live subtotal differs by more than ~1% (per-line, before tax), surface the diff in plain English before reading the total back. Don't surprise the customer with a price hike at the approval moment.
-   6. **Then proceed** with the standard phase-1 → restate-total → `link-cli spend-request create` → push-approve → phase-2 cycle from `references/mpp.md`.
-   7. **On success, append the order to `~/.buck-mason-stylist/wishlist.jsonl`** — one JSONL record per item with the lookbook id, item name, size, resolved SKU, qty, `order_id`, and `purchased_at`. This is the cross-session memory the agent reads next time the customer opens a lookbook ("you bought the camp shirt last week — different color this time?").
+Read the relevant reference before invoking. Don't reconstruct either contract from this paragraph. The `html-cart` lookbook prose-handoff parser, ship/coupon/credit defaults, price-drift check, and post-success wishlist append all live in `references/mpp.md` § "Entry point — the `html-cart` lookbook prose handoff."
 
 ### 5. Order tracking + returns — "where's my order" / "I want to return this"
 

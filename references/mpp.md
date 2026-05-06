@@ -13,6 +13,18 @@ The agent-side tooling is **[stripe/link-cli](https://github.com/stripe/link-cli
 
 **Don't pick MPP unless the customer has explicitly opted into agent-driven payment.** The default is the permalink — safer and simpler. The customer's Link push-approval IS the consent step that replaces the browser redirect.
 
+## Entry point — the `html-cart` lookbook prose handoff
+
+The most common way the customer enters the MPP path is by pasting (or speaking) back the plain-prose handoff emitted by an `html-cart` lookbook (`references/output-formats.md` § "The handoff is plain English"). Format: a short paragraph naming the lookbook + bulleted items with sizes. Voice flows skip the paste step entirely — the customer says "from the LA Mellow Weekend lookbook, I want the camp shirt in L and the chinos in 31" — same vocabulary, same handler. On receiving the handoff (text or speech):
+
+1. **Detect the handoff.** Heuristics: text mentions a Buck Mason lookbook context (e.g., starts with `Buck Mason — <title>` or refers to "the lookbook") and lists items with sizes. The customer might trim the paragraph or speak a fragment ("the camp shirt and the chinos") — accept either. Don't require a rigid envelope; if the message looks plausibly like a stylist handoff, proceed and confirm at the summary step.
+2. **Resolve each item by name.** For each line, search `GET /mcp/buckmason/products?gender=<m|w>&q=<distinctive substring>` (`q` is exact-substring per `references/mcp-api.md`, so prefer short distinctive phrases — "Deuce Coupe Camp Shirt" beats the full product name), then `GET /products/<id>` and pick the variant matching the stated size. If the agent still has the conversation context that generated the lookbook, "the camp shirt" maps unambiguously to the rendered Look 01 piece — no MCP search needed. Resolve from `~/.buck-mason-stylist/wishlist.jsonl` if the agent was started fresh in a new session and the prose carries a `lookbook_id`-style date+title line.
+3. **Disambiguate when needed.** If a name resolves to multiple products (rare on Buck Mason's catalog), ask the customer one question naming the candidates — never silently pick.
+4. **Gather the rest conversationally — one round trip, defaults assumed.** Default: ship to `profile.md → shipping`, no coupon, apply all available customer credit. Restate as: *"Shipping to <street>, no coupon, applying $X in credit. Anything to change?"* Accept either "go ahead" or a one-line correction (`pickup at Abbot Kinney`, `code SPRING25`, `skip credit`).
+5. **Spot price drift.** The prose carries a "Subtotal at pick" line. If the phase-1 live subtotal differs by more than ~1% (per-line, before tax), surface the diff in plain English before reading the total back. Don't surprise the customer with a price hike at the approval moment.
+6. **Then proceed** with the standard phase-1 → restate-total → `link-cli spend-request create` → push-approve → phase-2 cycle from § "Lifecycle (one endpoint, two phases)" below.
+7. **On success, append the order to `~/.buck-mason-stylist/wishlist.jsonl`** — one JSONL record per item with the lookbook id, item name, size, resolved SKU, qty, `order_id`, and `purchased_at`. This is the cross-session memory the agent reads next time the customer opens a lookbook ("you bought the camp shirt last week — different color this time?").
+
 ## Lifecycle (one endpoint, two phases)
 
 ```
