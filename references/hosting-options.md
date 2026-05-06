@@ -233,6 +233,33 @@ Once the lookbook is hosted, hit `https://www.opengraph.xyz/url/<encoded-deploy-
 - **PDF / PPT** — different unfurl model (the chat client previews the file itself, not via OG meta).
 - **0x0.st with `--no-og` customer preference** — if the customer says "I don't want a preview, just the link," skip the og.jpg upload step and leave the placeholders unresolved. Most clients fall back to a textual unfurl.
 
+## URL stability — one Pages project per permanent lookbook
+
+**The default Cloudflare Pages model overwrites the stable alias on every deploy.** When you `wrangler pages deploy <dir> --project-name foo` repeatedly, `https://foo.pages.dev/` always serves the latest deploy — the previous one is no longer reachable at that URL (per-deploy URLs at `https://<deploy-sha>.foo.pages.dev/` do persist, but they're ugly and not what the customer bookmarks). For test/iteration this is fine — `buckmason-stylist-test` is the canonical "rebuild and replace" project. **For permanent customer-facing lookbooks (weekly newsletter, event-driven generations the customer will refer back to), each lookbook gets its own project**:
+
+```bash
+# Pattern: buckmason-<customer-handle>-<lookbook-id>
+PROJECT="buckmason-nick-2026-05-09-mellow-la"
+scripts/deploy-lookbook.sh ./deploy "$PROJECT" --auto --no-overwrite
+# → https://buckmason-nick-2026-05-09-mellow-la.pages.dev/
+```
+
+The customer can bookmark, share, or revisit any URL ever generated this way and it will keep working — Cloudflare doesn't garbage-collect inactive Pages projects on the free tier. Fifty-two weekly lookbooks per year × multiple years × all event-driven runs adds up to a few hundred projects over time, well within the Pages free-tier project quota (currently 100 active per project but unlimited inactive — verify against the customer's Cloudflare dashboard before going long-running).
+
+### `--no-overwrite` flag
+
+`scripts/deploy-lookbook.sh --no-overwrite` aborts if the named project already has a prior deployment. **Use it on every customer-facing recurring run** to make the URL-stability guarantee load-bearing — if the script ever silently overwrites a project the customer expected to be permanent, the bookmark breaks. Test/iteration scripts (which intentionally rebuild on the same project) just don't pass the flag.
+
+### Naming convention
+
+| Lookbook kind | Project name pattern |
+|---|---|
+| Test / iteration | `buckmason-stylist-test` (or any short fixed name — overwritten freely) |
+| Event-driven (one-off) | `buckmason-<customer>-<lookbook-id>` (e.g. `buckmason-nick-2026-05-09-mellow-la`) |
+| Recurring (weekly newsletter) | `buckmason-<customer>-weekly-<YYYY-WW>` (e.g. `buckmason-nick-weekly-2026-19`) |
+
+Customer's preferred prefix lives in `profile.md → lookbook_project_prefix` (default `buckmason-<email-handle>`). Append the `lookbook_id` from the build config — same string the file is filed under. Both segments are kebab-case; the URL ends up readable by humans.
+
 ## Quick decision tree (when probing isn't worth it)
 
 For a one-shot ask where the customer has already named a transport:

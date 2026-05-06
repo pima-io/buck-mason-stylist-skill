@@ -1,7 +1,7 @@
 ---
 name: buck-mason-stylist
 description: Personal shopping skill for Buck Mason. Stock-checks (online + nearby store), wardrobe gap analysis, season- and event-aware outfit suggestions, AI try-on lookbooks, and one-shot cart + checkout. Customer brings sizes once; the agent reuses them across requests.
-version: 0.2.0
+version: 0.3.0
 license: MIT
 authors:
   - Buck Mason / Pima
@@ -156,78 +156,56 @@ If you only have the SKU (not the product), skip steps 1–2 and go straight to 
 
 ### 3. Lookbook generation — "show me in these clothes, in [setting]"
 
-This composes a try-on image using the customer's reference photos + product imagery via OpenAI's image API. **Identity and garment fidelity are the whole product** — a generic-looking model in the wrong fabric weight defeats the point. Read `references/image-generation.md` for the full structured prompt template; the rules below summarize the must-do checks.
+A lookbook is a small set of recommended outfits in a sharable artifact. Try-on imagery (gpt-image-2 placing the customer in the clothes) is the *premium* mode — the skill degrades gracefully through three tiers depending on what's set up, and **always produces something usable**:
 
-Before posting to `/v1/images/edits`, assemble these in this exact order:
+**Fallback ladder — pick the highest tier the runtime supports.**
 
-1. **Identity anchors (≥ 2 photos):** load `profile.md → reference_photos`. Order them clean-portrait-first, then full-body, then any contextual shots. Refuse to generate with only one photo — ask for a second. One photo lets the model generalize; two locks it down; three is best.
-2. **Build + face fact sheet** from `profile.md` Build and Face sections — height, weight, build, shoulder/torso/leg ratios, posture, age range, hair, beard, eye color, skin tone, glasses, distinguishing features. Pass these as labeled lines in the prompt; do not let the model invent any of them.
-3. **Garment fact sheet per item** from `GET /mcp/buckmason/products/<id>` — color (name + visual + hex if known), fabric content, weight, weave, drape, silhouette, construction, fit on this customer's size. If a field can't be extracted from `description_md`, list it as missing rather than guessing — guessing produces wrong fabric weight, which is the most common image-gen failure mode.
-4. **Product flat-lay images** from `GET /mcp/buckmason/products/<id>/imagery`:
-   - Prefer the `try_on` field when present — Buck Mason's flat-lay heuristic. One image per garment; pass them after the identity anchors.
-   - When `try_on` is `null`, the response carries `try_on_warning` explaining why (typically: "no safe try-on image available — only on-model editorial shots exist; downstream agents should crop to garment region or skip try-on for this product"). Two acceptable fallbacks: (a) use the `hero` image and add an explicit prompt directive — *"This reference is an on-model shot; use ONLY the garment, ignore the original wearer's body, pose, and any background"* — or (b) skip the try-on for that piece and render the lookbook with text + flat-lay only. Don't silently pass an on-model reference as if it were a flat-lay; the model will copy the wrong body.
-   - The `try_on_is_flat` boolean confirms whether the chosen `try_on` is actually a flat-lay or just the best-available crop. Even when `try_on` is non-null, `try_on_is_flat: false` means apply the same on-model directive as in (a).
-5. **Setting + composition** from `GET /mcp/buckmason/lookbook/settings?occasion=…&season=…&region=…` — pick one entry from the returned `looks[]`, or roll your own only if the curated list doesn't fit.
-3. For each look in the lookbook (typically 3–5):
-   - Build an OpenAI image-edit call with: the reference photo as the subject, the product flat-lays as `image[]` references, and a prompt describing the setting (from event context — "golden-hour vineyard, Sonoma County, May, candid 35mm").
-   - Use `model: "gpt-image-2"`, `quality: "high"`, `size: "1024x1536"` (portrait) by default. The skill standardizes on `gpt-image-2` for identity + garment fidelity; do not silently downgrade to `gpt-image-1`.
-   - Save each generated image with a sortable filename (`lookbook/<date>-<event>-look-N.png`).
-4. **Pick an output format.** Ask the customer once. **Default to `html-cart`** when MPP is reachable; otherwise default to `ppt`. MPP is reachable when **both** are true:
-   - `@stripe/link-cli` is installed in the agent's runtime (operator-side capability), AND
-   - the customer has a **Stripe Link account with a payment method linked** (customer-side capability) — persisted as `profile.md → link_payment_method: confirmed`.
+| Tier | Requires | Output |
+|---|---|---|
+| **Premium** | `OPENAI_API_KEY` (gpt-image-2 verified org) + ≥2 reference photos in `profile.md` | AI try-on hero per look |
+| **Editorial** | none | Buck Mason on-model + flat-lay product imagery laid out per look (no AI) |
+| **Minimum** | none | Per-look bullet list with names, prices, clickable URLs, stock lines, one-sentence rationale per pick |
 
-   If `link_payment_method` is `unconfirmed` (the default after `cp templates/profile.example.md …`), ask once on the first lookbook request — *"Do you have Stripe Link set up with a payment method? It's what lets me check you out without bouncing to a browser."* — and persist the answer (`confirmed` / `none`) to `profile.md`. Without a Link wallet, fall back to `ppt` or read-only `html`. The customer's wallet status only fully resolves at the push-approval moment in workflow #4 path B; this profile field is the routing hint, not a guarantee.
+The minimum-viable lookbook still includes the things that make the format useful — names, prices, URLs, in-your-size stock, rationale. Don't block the flow on a missing OpenAI key or a missing photo; produce the editorial or minimum tier and tell the customer how to upgrade.
 
-   Note that `OPENAI_API_KEY` is a separate gate — required for the **try-on images** in any of these formats, not for MPP. The two capabilities are orthogonal.
+**Per-format pick (run regardless of tier):**
 
-   | Format | When to use | What it is |
-   |---|---|---|
-   | **`images`** (PNG only) | Quick iteration, "just show me the looks" | The raw `lookbook/<date>-<event>-look-N.png` files. Fastest. No assembly step. |
-   | **`ppt`** | Sharing with a stylist / SO / yourself for review | A 16:9 `.pptx` with cover slide + one slide per look, each look showing the generated image alongside per-piece thumbnails, prices, clickable buckmason.com links, in-your-size stock per location, and a per-look total. Opens in Keynote / PowerPoint / Google Slides. |
-   | **`html`** | Public preview link, email body, anything that needs to render in a browser | A single self-contained `lookbook.html` with the same content as the PPT, viewable in any browser, easy to host or attach. Images embedded as base64 so the file works offline. Read-only — no buy affordance. |
-   | **`html-cart`** (default when MPP is reachable) | Customer is going to buy from the lookbook | Same as `html` plus a checkbox per piece + a "Send to my stylist" button that emits a structured JSON handoff block. The customer pastes it back to the agent, the agent runs **MPP checkout** (workflow #4 path B). Buck Mason / Shopify never enter the customer's UI. |
+| Format | When | Detail |
+|---|---|---|
+| `images` | "just the photos" / fastest iteration | Raw `lookbook/<date>-<event>-look-N.png` only |
+| `ppt` | review with stylist / SO | 16:9 `.pptx`, default when MPP isn't reachable |
+| `html` | shareable preview, email body, read-only | Self-contained HTML, no buy affordance |
+| `html-cart` *(default when MPP is reachable)* | customer is going to buy | Interactive HTML with checkbox cart + plain-prose stylist handoff |
 
-   Phrases that map to each format:
-   - `images` / "just the photos" / "PNG only"
-   - `ppt` / `pptx` / "slide deck" / "presentation" / "for [person]"
-   - `html` / "web page" / "shareable link" / "email me" / "read-only"
-   - `html-cart` / "let me pick what I want" / "shop from this" / "interactive" — and the implicit default whenever the customer says "build me a lookbook" without specifying
+**MPP-reachable** means `@stripe/link-cli` is installed agent-side AND `profile.md → link_payment_method: confirmed` (customer has a Stripe Link wallet with a payment method). When `unconfirmed`, ask once and persist the answer; without it, fall back to `ppt` or `html`. `OPENAI_API_KEY` is a separate gate (try-on images), orthogonal to MPP.
 
-   Build instructions per format are in **`references/output-formats.md`** — including the `python-pptx` builder, the static HTML template + base64-embed step, the interactive `html-cart` skeleton (checkbox CSS, sticky cart bar, handoff modal), and the must-haves for every format (clickable links, stock per piece in the customer's size, Look total). The `html-cart` handoff is **plain English prose**, not JSON — speakable to a voice agent, pasteable into a chat — defined there.
+**Build the lookbook**:
+- Premium-tier image-gen: structured prompt template, identity-anchor + build/face fact sheet rules, garment fact sheet per item, setting/composition pulled from `GET /mcp/buckmason/lookbook/settings` — full mechanics in **`references/image-generation.md`**.
+- Output assembly (`images` / `ppt` / `html` / `html-cart` builders, per-format must-haves, brand styling, OG meta tags, responsive breakpoints, lightbox, prose handoff): **`references/output-formats.md`** + **`references/brand-style.md`**.
+- Hosting: **`references/hosting-options.md`** (capability-aware probe + ranked transports).
+- Acceptance gates before sharing the URL: **`references/acceptance-checklist.md`** — every format must clear it.
+- Headless / scheduled / cron-mode runs (no questions, defaults assumed, silent unless blocker): **`references/headless-mode.md`**.
+- **Per-lookbook isolation (non-negotiable): `references/run-layout.md`.** Each lookbook gets its own `~/.buck-mason-stylist/runs/<lookbook_id>/` directory; never reuse images, picks, or configs from another run. The build script enforces a `.lookbook_id` marker check and aborts if `--look-images` came from a different lookbook.
 
-5. Render the lookbook in the chosen format. **Every format must include**: product names, prices, clickable buckmason.com links, in-your-size stock per location (bucketed: `In stock` / `Low (N)` / `Out`), and a per-look total. Each look gets a "Build cart for this look" handoff to workflow 4.
-
-**Always disclose** that the try-on images are AI-generated previews, not photos of real garments on the customer.
+**Always disclose** in the cover/footer that try-on images are AI-generated previews, not photos of real garments on the customer.
 
 ### 4. Cart + checkout — "build me a cart" / "send me the checkout link"
 
-1. Default path — **stateless cart link**:
-   ```
-   POST /mcp/buckmason/cart
-   { "items": [{"slug_or_code":"daily-shirt-olive","size":"L","qty":1},
-                {"slug_or_code":"tobacco-chino","size":"32x32","qty":1}],
-     "coupon": "SPRING25" }
-   ```
-   Response includes `checkout_url` (a Shopify cart permalink) and `subtotal`. Hand the URL to the customer; they review and pay in their browser.
+Two routes, picked by capability and customer intent. **Cart affordance rules** (what to render in the customer's chat) below; full wire-protocol detail in the linked reference.
 
-   **In-store pickup variant.** When the customer says "pickup", "I'll grab it", "have it ready at [store]", or names a Buck Mason store, build the cart with a pickup hint:
-   ```
-   POST /mcp/buckmason/cart
-   { "items": [...],
-     "pickup_location_slug": "abbot-kinney"   // OR "pickup_location_id": 2
-   }
-   ```
-   The MCP server attaches `?attributes[Pickup-Location]=<name>` to the returned `checkout_url` so the pickup option pre-selects on Shopify's checkout. **Before building**, confirm every SKU is in stock at the named store via `/mcp/buckmason/stock/:sku` (filter by SKU + location). Behaviour by stock state:
-   - All items in stock at the chosen store → build pickup cart, return `checkout_url` + a one-line "Ready for pickup at <store>" confirmation.
-   - Customer named a store but it's out of stock → suggest the nearest in-stock pickup-enabled store and confirm before building.
-   - Customer didn't name a store ("for pickup near me") → pick the nearest `pickup_enabled` store with all SKUs in stock; if none qualifies, fall back to ship-it with a one-line "no nearby store has all of these in stock; shipping default."
-   - Mixed availability across the chosen store → don't auto-split. Tell the customer the gap and ask: pickup the in-stock items + ship the rest as two carts, or ship the whole order as one.
-   - Pickup-disabled location → silently skip, pick the next-nearest.
+**Path A — Shopify cart-link (default).** Stateless `POST /mcp/buckmason/cart` returns a Shopify checkout permalink the customer pays in their own browser. Body shape:
 
-   Don't substitute sizes for pickup convenience. If the customer's exact size is out at the chosen store but a different size is in, surface and ask — never substitute silently.
-2. If the customer is logged in and wants to use a coupon or store credit before they hit Shopify, use `POST /api/update_cart` + `POST /api/add_coupon_or_customer_credit` (Pima-side cart) instead, then surface the resulting cart's checkout URL.
+```json
+{ "items": [{ "slug_or_code": "daily-shirt-olive", "size": "L", "qty": 1 }],
+  "coupon": "SPRING25",
+  "pickup_location_slug": "abbot-kinney" }
+```
 
-3. **Fully agent-driven checkout (MPP path).** When the customer wants the agent to handle the entire transaction — line items, shipping, payment, confirmation — without bouncing to a browser, use the **[Merchant Payments Protocol](https://mpp.dev)** endpoint at `POST https://pima.io/mcp/buckmason/checkout`. Required when the surface has no browser (voice agents, concierge flows, headless installations). The protocol uses HTTP 402 + `WWW-Authenticate: Payment` to challenge the agent for a **Stripe Shared Payment Token (SPT)**, which the agent obtains via **[stripe/link-cli](https://github.com/stripe/link-cli)** — the customer push-approves the spend in their Link wallet on their phone, and link-cli returns the SPT. The push-approval IS the consent. Always read the `total` back to the customer before kicking off `link-cli spend-request create`; always echo `acknowledged_total_cents` on the second POST to catch hallucinated totals. Coupons (`coupon: "..."`) and customer credits (`customer_credit_codes: [...]`) work as bearer codes — same model as POS. The full lifecycle, two-phase request shapes, guardrails (idempotency, total mismatch, card decline), coupon/credit envelope, and worked transcript are in **`references/mpp.md`** — read it before invoking the endpoint.
+Cart-affordance rules the agent must follow before returning the URL to the customer: (1) confirm every SKU is in stock at the named pickup store via `/stock/:sku` before building a pickup cart; (2) never silently substitute sizes; (3) on mixed pickup availability, don't auto-split — present the gap and ask. Worked behavior table for pickup edge cases + the `/api/update_cart`-with-coupon variant: see **`references/cart-rules.md`**.
+
+**Path B — MPP fully-agent-driven (`POST /mcp/buckmason/checkout`).** When the customer has opted into agent-driven payment (`profile.md → link_payment_method: confirmed`) and the runtime has `@stripe/link-cli`. HTTP 402 + Stripe Shared Payment Token + push-approval in the customer's Link app. Read **`references/mpp.md`** before invoking — it carries the two-phase request lifecycle, idempotency, total-mismatch guard, coupon/credit envelope, on-paste-back handler from the `html-cart` lookbook prose, and the worked transcript.
+
+**Always read the order total back to the customer in plain English** before hitting either path. The push-approval (MPP) or the click-through (cart-link) is the consent step — there's no second confirmation gate after the URL or SPT request goes out.
 
    **Lookbook-driven entry point.** The most common way the customer enters this path is by pasting (or speaking) back the **plain-prose handoff** emitted by an `html-cart` lookbook (workflow #3 step 4). Format: a short paragraph naming the lookbook + bulleted items with sizes. Voice flows skip the paste step entirely — the customer just says "from the LA Mellow Weekend lookbook, I want the camp shirt in L and the chinos in 31" — same vocabulary, same handler. On receiving the handoff (text or speech):
    1. **Detect the handoff.** Heuristics: text mentions a Buck Mason lookbook context (e.g., starts with `Buck Mason — <title>` or refers to "the lookbook") and lists items with sizes. The customer might trim the paragraph or speak a fragment ("the camp shirt and the chinos") — accept either. Don't require a rigid envelope; if the message looks plausibly like a stylist handoff, proceed and confirm at the summary step.
@@ -318,5 +296,16 @@ When choosing or recommending items, weight by (in this order):
 - `references/brand-style.md` — extracted Buck Mason visual style guide (typography, colors, button shape, image ratios) sourced from buckmason.com directly. **Load before generating any `html-cart`, `html`, `ppt`, or `pdf` lookbook** so the rendered surface reads as Buck Mason, not generic-AI-editorial.
 - `references/hosting-options.md` — capability-aware menu of hosts for the HTML lookbook (Cloudflare Pages → Netlify → Vercel → Surge → Gist → S3 → 0x0.st). Probe script, deploy commands per transport, design rules (confirm before publish, sticky preference in `profile.md`, "tool installed but unauthenticated" is a soft-no).
 - `references/mpp.md` — Merchant Payments Protocol (mpp.dev) checkout: HTTP 402 challenge + Stripe Shared Payment Token via stripe/link-cli for fully agent-driven transactions when there's no browser. Two-phase request lifecycle, guardrails, and a worked transcript.
+- `references/cart-rules.md` — affordance rules for the Shopify cart-link path (workflow #4 path A): pre-build stock checks, pickup edge cases, no-silent-substitution rule, error envelope.
+- `references/acceptance-checklist.md` — the gate every lookbook clears before the agent shares the URL. Operationalized as `scripts/validate-lookbook.py`.
+- `references/headless-mode.md` — five rules for scheduled / cron / voice runs: no questions, defaults, fallback tier, deploy-only-if-pre-authorized, silent-unless-blocker. Run summary format.
+- `references/event-suitability.md` — calendar-driven scoring rubric (0–10) for "should this event trigger a lookbook?" with hard-veto for medical/therapy. Operationalized as `scripts/score-calendar-event.py`.
+- `references/run-layout.md` — per-lookbook directory isolation rules + the `.lookbook_id` marker convention. **Hard rule**: never share images/picks/configs across lookbooks. `scripts/build-html-lookbook.py` enforces the marker check.
 - `templates/profile.example.md`, `wardrobe.example.md`, `events.example.md` — copy these into the customer's workspace and fill in.
+- `templates/profile.schema.json` — JSON Schema for `profile.md`. Validate machine-readably; enum'd allowed values for `gender`, sizes, `link_payment_method`, `preferred_lookbook_host`, etc.
 - `examples/stock-check.md`, `examples/lookbook.md` — concrete walkthroughs of the two main flows.
+- `scripts/build-html-lookbook.py` — deterministic deploy-directory builder (config + picks JSON → index.html + thumbs + og.jpg).
+- `scripts/deploy-lookbook.sh` — Cloudflare Pages deploy wrapper: probes wrangler auth, idempotent project create, local + deployed validate, single-URL output for headless callers.
+- `scripts/validate-lookbook.py` — runs `references/acceptance-checklist.md`. Pass `--dir <local>` and/or `--url <deployed>`.
+- `scripts/score-calendar-event.py` — implements `references/event-suitability.md`. JSON in, `{score, breakdown, action}` out.
+- `scripts/discover-weekly-candidates.py` — surfaces recently-live + previously-unproposed products for the recurring weekly newsletter (`references/headless-mode.md` § "Recurring weekly newsletter"). Dedupes against `~/.buck-mason-stylist/wishlist.jsonl`.

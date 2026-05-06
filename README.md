@@ -71,8 +71,19 @@ See `examples/stock-check.md` and `examples/lookbook.md` for full walkthroughs.
 | `references/brand-style.md` | Buck Mason visual style guide (fonts, colors, button shape, image ratios) extracted from buckmason.com — used by every rendered lookbook builder |
 | `references/hosting-options.md` | Capability-aware menu of hosts for the HTML lookbook — probe script + ranked transports (Cloudflare Pages → Netlify → Vercel → Surge → Gist → S3 → 0x0.st) |
 | `references/mpp.md` | Merchant Payments Protocol checkout (mpp.dev + stripe/link-cli) — fully agent-driven transactions via HTTP 402 + Stripe Shared Payment Token |
+| `references/cart-rules.md` | Cart-link affordance rules — pickup edge cases, stock checks, error envelope |
+| `references/acceptance-checklist.md` | Lookbook validation gates (local + deployed) — implemented by `scripts/validate-lookbook.py` |
+| `references/headless-mode.md` | Cron / scheduled / voice run rules: no questions, defaults, fallback tier, deploy-if-pre-authorized, silent-unless-blocker |
+| `references/event-suitability.md` | Calendar-driven scoring rubric — score events 0–10; ≥6 triggers a lookbook (hard veto for medical/therapy) |
+| `references/run-layout.md` | Per-lookbook directory isolation + `.lookbook_id` marker convention (hard rule against cross-lookbook image reuse) |
 | `templates/*.example.md` | Copy these into your workspace |
+| `templates/profile.schema.json` | JSON Schema for the customer profile — machine-validate enums + required fields |
 | `examples/*.md` | End-to-end walkthroughs |
+| `scripts/build-html-lookbook.py` | Deterministic builder (config + picks → deploy directory) |
+| `scripts/deploy-lookbook.sh` | Cloudflare Pages deploy wrapper with probe + validate gates |
+| `scripts/validate-lookbook.py` | Runs `references/acceptance-checklist.md` against a local dir and/or deployed URL |
+| `scripts/score-calendar-event.py` | Implements `references/event-suitability.md` for calendar-driven invocations |
+| `scripts/discover-weekly-candidates.py` | Surfaces recently-live + previously-unproposed products for the weekly newsletter — dedupes against the long-term wishlist |
 | `PUBLISHING.md` | ClawHub distribution path |
 | `SECURITY.md` | Threat model, data flows, opt-in capability matrix, vulnerability reporting |
 

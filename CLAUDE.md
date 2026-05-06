@@ -106,6 +106,17 @@ The agent doesn't load every reference file at session start — `SKILL.md` poin
 3. Add the same entry in `README.md` § Files.
 4. Reference it from the relevant workflow with explicit "read this before X" prose.
 
+### `scripts/` is the deterministic spine
+
+For work that's fragile to reconstruct from prose (build, deploy, validate, score), the skill ships actual scripts under `scripts/`. The agent invokes them directly rather than re-deriving the logic each session. Current set:
+
+- `scripts/build-html-lookbook.py` — config + picks JSON → deploy directory (idempotent, no AI calls; gpt-image-2 outputs are supplied via `--look-images`).
+- `scripts/deploy-lookbook.sh` — Cloudflare Pages wrapper (probe → idempotent project create → deploy → post-deploy validate). Use `--auto` only when `profile.md → preferred_lookbook_host_auto: true`.
+- `scripts/validate-lookbook.py` — runs every gate in `references/acceptance-checklist.md` against a local dir and/or a deployed URL. Exit code: `0` pass, `1` local fail, `2` deployed fail.
+- `scripts/score-calendar-event.py` — implements `references/event-suitability.md`. JSON in, `{score, breakdown, action}` out, side-effect-free.
+
+When adding a new script: ship deterministic logic only (no LLM calls inside the script — those happen *around* the scripts in the agent's flow), add a one-line entry in SKILL.md § "Files in this skill" + README.md § Files, and gate it with the matching reference doc that explains the *why*.
+
 ### Keeping `references/mpp.md` in sync with Pima
 
 `references/mpp.md` is essentially API documentation for `pima.io/mcp/buckmason/checkout`. Pima moves under it; if the doc drifts, every agent loaded from this skill misbehaves on real money. Verify periodically (and any time you touch the workflow #4 / MPP prose):
