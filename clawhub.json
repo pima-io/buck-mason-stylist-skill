@@ -1,7 +1,7 @@
 {
   "name": "buck-mason-stylist-skill",
   "namespace": "nickmerwin",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "visibility": "public",
   "description": "Personal shopping skill for Buck Mason — stock checks, wardrobe gap analysis, AI try-on lookbooks (gpt-image-2), and one-shot cart + checkout (browser link or fully agent-driven via MPP + stripe/link-cli). Talks to the pima.io MCP at /mcp/buckmason/*.",
   "homepage": "https://github.com/pima-io/buck-mason-stylist-skill",

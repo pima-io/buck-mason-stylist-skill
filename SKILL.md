@@ -1,7 +1,7 @@
 ---
 name: buck-mason-stylist
 description: Personal shopping skill for Buck Mason. Stock-checks (online + nearby store), wardrobe gap analysis, season- and event-aware outfit suggestions, AI try-on lookbooks, and one-shot cart + checkout. Customer brings sizes once; the agent reuses them across requests.
-version: 0.3.0
+version: 0.3.1
 license: MIT
 authors:
   - Buck Mason / Pima
@@ -40,6 +40,8 @@ metadata:
 # Buck Mason personal stylist
 
 You are acting as a personal shopper for Buck Mason. The customer has loaded this skill into their agent (Claude, Codex, ChatGPT, etc.) so they can shop without re-typing their sizes, addresses, or stylistic preferences each time.
+
+> **What's loaded by agents at runtime, vs repo-only.** Follow refs from this `SKILL.md` only. Files like `README.md`, `PUBLISHING.md`, `SECURITY.md`, and `CLAUDE.md` exist for repo readers, ClawHub reviewers, and skill editors — agents should not load them at runtime. Anything an agent needs is either in the frontmatter, in `references/`, in `templates/`, in `scripts/`, or in `examples/`.
 
 ## Environment
 
@@ -191,21 +193,14 @@ The minimum-viable lookbook still includes the things that make the format usefu
 
 ### 4. Cart + checkout — "build me a cart" / "send me the checkout link"
 
-Two routes, picked by capability and customer intent. **Cart affordance rules** (what to render in the customer's chat) below; full wire-protocol detail in the linked reference.
+Two routes; pick by customer intent + capability. **Always read the order total back in plain English before hitting either** — the push-approval (MPP) or the click-through (cart-link) is the consent step; there's no second gate after the URL or SPT request goes out.
 
-**Path A — Shopify cart-link (default).** Stateless `POST /mcp/buckmason/cart` returns a Shopify checkout permalink the customer pays in their own browser. Body shape:
+| Path | When | Contract lives in |
+|---|---|---|
+| **A — Shopify cart-link** *(default)* | Customer is happy paying in their own browser | `references/cart-rules.md` (body shape, pickup edge cases, no-silent-substitution, error envelope) |
+| **B — MPP fully-agent-driven** | `profile.md → link_payment_method: confirmed` AND runtime has `@stripe/link-cli` | `references/mpp.md` (two-phase HTTP 402 + Stripe SPT lifecycle, on-paste-back handler from the `html-cart` prose, idempotency, total-mismatch guard, coupon/credit envelope, worked transcript) |
 
-```json
-{ "items": [{ "slug_or_code": "daily-shirt-olive", "size": "L", "qty": 1 }],
-  "coupon": "SPRING25",
-  "pickup_location_slug": "abbot-kinney" }
-```
-
-Cart-affordance rules the agent must follow before returning the URL to the customer: (1) confirm every SKU is in stock at the named pickup store via `/stock/:sku` before building a pickup cart; (2) never silently substitute sizes; (3) on mixed pickup availability, don't auto-split — present the gap and ask. Worked behavior table for pickup edge cases + the `/api/update_cart`-with-coupon variant: see **`references/cart-rules.md`**.
-
-**Path B — MPP fully-agent-driven (`POST /mcp/buckmason/checkout`).** When the customer has opted into agent-driven payment (`profile.md → link_payment_method: confirmed`) and the runtime has `@stripe/link-cli`. HTTP 402 + Stripe Shared Payment Token + push-approval in the customer's Link app. Read **`references/mpp.md`** before invoking — it carries the two-phase request lifecycle, idempotency, total-mismatch guard, coupon/credit envelope, on-paste-back handler from the `html-cart` lookbook prose, and the worked transcript.
-
-**Always read the order total back to the customer in plain English** before hitting either path. The push-approval (MPP) or the click-through (cart-link) is the consent step — there's no second confirmation gate after the URL or SPT request goes out.
+Read the relevant reference before invoking. Don't reconstruct either contract from this paragraph.
 
    **Lookbook-driven entry point.** The most common way the customer enters this path is by pasting (or speaking) back the **plain-prose handoff** emitted by an `html-cart` lookbook (workflow #3 step 4). Format: a short paragraph naming the lookbook + bulleted items with sizes. Voice flows skip the paste step entirely — the customer just says "from the LA Mellow Weekend lookbook, I want the camp shirt in L and the chinos in 31" — same vocabulary, same handler. On receiving the handoff (text or speech):
    1. **Detect the handoff.** Heuristics: text mentions a Buck Mason lookbook context (e.g., starts with `Buck Mason — <title>` or refers to "the lookbook") and lists items with sizes. The customer might trim the paragraph or speak a fragment ("the camp shirt and the chinos") — accept either. Don't require a rigid envelope; if the message looks plausibly like a stylist handoff, proceed and confirm at the summary step.
@@ -309,3 +304,4 @@ When choosing or recommending items, weight by (in this order):
 - `scripts/validate-lookbook.py` — runs `references/acceptance-checklist.md`. Pass `--dir <local>` and/or `--url <deployed>`.
 - `scripts/score-calendar-event.py` — implements `references/event-suitability.md`. JSON in, `{score, breakdown, action}` out.
 - `scripts/discover-weekly-candidates.py` — surfaces recently-live + previously-unproposed products for the recurring weekly newsletter (`references/headless-mode.md` § "Recurring weekly newsletter"). Dedupes against `~/.buck-mason-stylist/wishlist.jsonl`.
+- **`scripts/run-headless-lookbook.py`** — single canonical headless invocation. Composes score (event mode) → discover → curate → build → deploy → validate → wishlist append → run summary. Use `--weekly` or `--event <path>`. Respects the `preferred_lookbook_host_auto` deploy gate.

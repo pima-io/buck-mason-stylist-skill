@@ -102,18 +102,21 @@ Detail
 
 ```bash
 # Run as a /loop or cron job. The script bundle (scripts/) is deterministic
-# and headless-safe by construction.
+# and headless-safe by construction. Always invoke via the explicit
+# interpreter — ClawHub installs may strip the executable bit on unpack.
 python3 scripts/build-html-lookbook.py \
   --config "$RUN_DIR/config.json" \
   --picks  "$RUN_DIR/picks.json" \
   --look-images "$RUN_DIR/looks/" \
   --out "$RUN_DIR/deploy/"
 
-scripts/deploy-lookbook.sh "$RUN_DIR/deploy/" "$PROJECT_NAME" --auto
+bash    scripts/deploy-lookbook.sh "$RUN_DIR/deploy/" "$PROJECT_NAME" --auto --no-overwrite
 
-scripts/validate-lookbook.py --dir "$RUN_DIR/deploy/" \
+python3 scripts/validate-lookbook.py --dir "$RUN_DIR/deploy/" \
   --url "https://${PROJECT_NAME}.pages.dev/"
 ```
+
+The single canonical command that composes all of the above is **`scripts/run-headless-lookbook.py`** (orchestrator: discover → curate → build → deploy → validate → summary). For one-shot headless runs prefer that — see § "The end-to-end orchestrator" below.
 
 If any step's exit code is non-zero, the run summary file is the failure form. If all three succeed, the summary file is the success form and (if a `notify_url` is wired) the agent posts the summary to that channel.
 
@@ -172,11 +175,25 @@ python3 scripts/build-html-lookbook.py --no-tryon \
   --out    "$RUN_DIR/deploy/"
 
 PROJECT="${LOOKBOOK_PROJECT_PREFIX}-weekly-2026-19"
-scripts/deploy-lookbook.sh "$RUN_DIR/deploy/" "$PROJECT" --auto --no-overwrite
+bash scripts/deploy-lookbook.sh "$RUN_DIR/deploy/" "$PROJECT" --auto --no-overwrite
 
 # Append every proposed piece to the wishlist with proposed_at + lookbook_url.
 # (Either inline or via a future scripts/log-proposal.py — keep agent-side.)
 ```
+
+## The end-to-end orchestrator
+
+Use `scripts/run-headless-lookbook.py` for a single canonical headless invocation. It composes the deterministic chain (score → discover → curate → build → deploy → validate → summary), skips on hard-veto events, falls back to Editorial when Premium isn't reachable, and writes a run-summary file at `~/.buck-mason-stylist/runs/<lookbook_id>/summary.md`.
+
+```bash
+# Weekly newsletter
+python3 scripts/run-headless-lookbook.py --weekly --profile ~/agent-workspace/profile.md
+
+# Event-driven (auto-scored; skips on hard-veto)
+python3 scripts/run-headless-lookbook.py --event /path/to/event.json --profile ~/agent-workspace/profile.md
+```
+
+The orchestrator never deploys without `preferred_lookbook_host_auto: true` in the profile; on missing prereqs it produces the lookbook locally (under `~/.buck-mason-stylist/runs/<lookbook_id>/deploy/`) and writes a summary saying "ready to deploy — set `_auto: true` or run interactively to publish." That preserves the deploy-authorization rule even when an event scores 7–10 and would otherwise auto-generate AND auto-deploy.
 
 The run summary (per § "The run summary format" above) reports the URL, the count of new products surfaced, and any reason items got dropped (out of stock, ethos mismatch, already proposed within 8 weeks).
 

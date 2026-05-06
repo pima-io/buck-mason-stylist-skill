@@ -72,8 +72,10 @@ Reads the customer's chat history (or `profile.md → notes`) for explicit ask:
 |---|---|
 | ≤ 5 | Skip silently. Don't surface anything. |
 | 6 | Soft surface — one sentence on the next interactive turn ("you have X coming up — want a lookbook?"). Never auto-generate. |
-| 7–8 | Auto-generate the **Editorial tier** (no try-on; product imagery + flat-lays). Saves the OpenAI cost; customer can request the premium tier if they want try-on. |
-| 9–10 | Auto-generate the **Premium tier**. The customer probably wants try-on imagery for an event scoring this high. |
+| 7–8 | Auto-generate the **Editorial tier** **locally** (no try-on; product imagery + flat-lays). Saves the OpenAI cost; customer can request the premium tier if they want try-on. |
+| 9–10 | Auto-generate the **Premium tier** **locally**. The customer probably wants try-on imagery for an event scoring this high. |
+
+**Generate ≠ deploy.** "Auto-generate" here means the agent runs the score → curate → build chain locally and writes the lookbook to `~/.buck-mason-stylist/runs/<lookbook_id>/deploy/`. It does **not** mean the agent deploys the URL publicly — that step still requires `profile.md → preferred_lookbook_host_auto: true` per `references/headless-mode.md`. Without `_auto: true`, an auto-generated lookbook lands locally with a summary saying "ready to deploy"; the customer publishes interactively when ready.
 
 Auto-generation runs in headless mode (`references/headless-mode.md`) — silent unless there's a result or blocker. The customer receives the run summary on their notification channel.
 

@@ -240,7 +240,7 @@ Once the lookbook is hosted, hit `https://www.opengraph.xyz/url/<encoded-deploy-
 ```bash
 # Pattern: buckmason-<customer-handle>-<lookbook-id>
 PROJECT="buckmason-nick-2026-05-09-mellow-la"
-scripts/deploy-lookbook.sh ./deploy "$PROJECT" --auto --no-overwrite
+bash scripts/deploy-lookbook.sh ./deploy "$PROJECT" --auto --no-overwrite
 # → https://buckmason-nick-2026-05-09-mellow-la.pages.dev/
 ```
 

@@ -123,12 +123,18 @@ look_hero = {}   # look_id -> filename relative to OUT
 for look in CFG["looks"]:
     look_id = look["id"]
     if args.no_tryon:
-        # Editorial tier: use the first piece's hero image as the cover for the look
+        # Editorial tier: use the first piece's hero image as the cover for the look.
+        # Pieces may carry imagery as either a structured try_on/hero object
+        # (from /products/:id/imagery) or just an image_url string (from the
+        # /products list endpoint, which is what discover-weekly-candidates
+        # emits). Fall through both shapes.
         pieces = [p for p in PICKS if p["look"] == look_id]
         if not pieces:
             continue
-        src_url = ((pieces[0].get("try_on") or {}).get("url")
-                   or (pieces[0].get("hero") or {}).get("url"))
+        p0 = pieces[0]
+        src_url = ((p0.get("try_on") or {}).get("url")
+                   or (p0.get("hero") or {}).get("url")
+                   or p0.get("image_url"))
         if not src_url:
             print(f"warn: no hero image for {look_id}", file=sys.stderr)
             continue
@@ -151,15 +157,18 @@ for look in CFG["looks"]:
 # Per-piece thumbnails
 for p in PICKS:
     src_url = ((p.get("try_on") or {}).get("url")
-               or (p.get("hero") or {}).get("url"))
+               or (p.get("hero") or {}).get("url")
+               or p.get("image_url"))
     if not src_url:
         continue
     p["thumb_path"] = f"thumb-{p['id']}.jpg"
     thumb(src_url, OUT / p["thumb_path"], w=240)
 
 # og.jpg (1200×630, white-letterboxed from look 1's hero or first piece's image)
-cover_src = OUT / look_hero.get(CFG["looks"][0]["id"], "")
-if cover_src.exists():
+first_look_id = CFG["looks"][0]["id"] if CFG.get("looks") else None
+hero_name = look_hero.get(first_look_id) if first_look_id else None
+cover_src = (OUT / hero_name) if hero_name else None
+if cover_src and cover_src.is_file():
     cover = Image.open(cover_src).convert("RGB")
     canvas = Image.new("RGB", (1200, 630), (255, 255, 255))
     ratio = min(1200 / cover.width, 630 / cover.height)
@@ -172,6 +181,7 @@ if cover_src.exists():
 def fullsize_url(p):
     return ((p.get("hero") or {}).get("url")
             or (p.get("try_on") or {}).get("url")
+            or p.get("image_url")
             or "")
 
 def stock_line(p):
