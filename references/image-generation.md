@@ -183,6 +183,24 @@ Hard constraints (do NOT violate):
   conventionally attractive than the references show.
 - Body proportions, shoulder-to-waist ratio, and limb length must match the
   references.
+- Do NOT produce a generic AI-male model face. If the generated face has
+  smooth-symmetric features, plastic skin, mannequin-like uniformity, an
+  unnaturally even jaw, or the "conventionally photogenic" look common in
+  image-gen output — that's the failure mode to avoid. The reference photos
+  are the source of truth; a generated face that "looks better" than the
+  reference is a wrong face.
+
+Face fidelity self-check (perform internally before emitting the output):
+1. Side-by-side compare the rendered face with reference image 1.
+2. Verify each: hair color + parting, beard pattern + density, eye color,
+   apparent age (NOT younger), skin tone, distinguishing features (scars,
+   moles, freckles, asymmetry).
+3. Verify facial asymmetry from the references (eye spacing, cheek structure,
+   jaw line, brow) is preserved — NOT smoothed to bilateral symmetry.
+4. If any check fails, regenerate the face region from the references before
+   emitting. A face that fails this check would be off-putting to the customer
+   (the lookbook is meant to look like THEM, not like a model who shares
+   their hair color).
 
 GARMENT — EXACT MATCH
 There are <K> garment images that follow the identity references. Render each
@@ -247,6 +265,68 @@ After each generation, eyeball:
 4. **Anatomy** — extra fingers/limbs are still possible. If a generation has obvious flaws, regenerate once with the same prompt; don't iterate the prompt.
 
 If 3 regenerations still fail on a look, fall back to **flat-lay** for that look and note it in the lookbook.
+
+## Face verification gate — second-line defense
+
+Prompt-level rules catch some identity drift but not all. Treat every Premium-tier generation as a candidate that has to pass an explicit verification gate **before** it gets stamped into `runs/<lookbook_id>/looks/` and consumed by `scripts/build-html-lookbook.py`. Without the gate, a single bad face can ship to the customer in a hosted lookbook — the trust-damaging failure this whole pipeline exists to avoid.
+
+### The gate
+
+Implementation: **`scripts/verify-face.py`**. Calls GPT-4o-vision with the generated PNG + the customer's reference photos and a strict rubric, returns JSON pass/fail.
+
+Cost: ~$0.01–0.03 per generation (one vision call against ~3 images at 1024px). Compared to the $0.15–0.20 of the gpt-image-2 generation itself, the verification overhead is small change.
+
+Usage:
+
+```bash
+python3 scripts/verify-face.py \
+  --generated runs/2026-05-09-mellow-la/looks/look1.png \
+  --reference ~/Pictures/me-portrait.jpg ~/Pictures/me-fullbody.jpg \
+  --threshold 6
+# Exit 0 = pass; exit 1 = fail (face drift); exit 2 = inconclusive (low-quality references, etc.)
+# Stdout: JSON {overall_pass, scores:{...}, off_putting, reason}
+```
+
+### Rubric (what the gate scores)
+
+The vision call asks for a structured JSON response:
+
+```json
+{
+  "hair_match":      0-10,
+  "beard_match":     0-10,
+  "eye_color_match": 0-10,
+  "skin_tone_match": 0-10,
+  "age_match":       0-10,
+  "asymmetry_match": 0-10,
+  "off_putting":     0-10,   // higher = MORE generic-AI-face / uncanny
+  "overall_pass":    true | false,
+  "reason":          "one sentence explaining the worst dimension"
+}
+```
+
+Default threshold (configurable via `--threshold`):
+- All match scores ≥ 6
+- `off_putting` ≤ 4
+- `overall_pass: true`
+
+The gate is intentionally strict because the cost of shipping a bad face (customer sees an off-putting AI-face version of themselves) is higher than the cost of regenerating once or falling back to Editorial.
+
+### Recovery flow
+
+When `verify-face.py` fails (exit 1):
+
+1. **Retry once with a stronger prompt** — re-run gpt-image-2 with reference photo #1 moved to position 0 (highest weight) AND with the verifier's `reason` appended to the IDENTITY block as a directive (e.g., `reason: "the rendered face has smoother skin and softer jaw than the reference"` → append `"Specifically: preserve the reference's skin texture and jaw definition; do NOT soften."`).
+2. **If retry also fails**, drop to Editorial tier for THAT look only. The other looks may still be Premium. Note the fallback in the run summary so the customer sees what happened ("Look 02 fell back to Editorial — AI try-on couldn't match the customer's face after 2 attempts").
+3. **Don't retry more than once.** A 3rd retry on the same look is throwing money at a model that's not cooperating; the right move is to fall back rather than chase a number.
+
+Inconclusive (exit 2) is a different failure: low-quality references or the verifier itself failing. Surface it as a setup problem, don't auto-fall-through.
+
+### Where it fits in the pipeline
+
+- **Manual / interactive flow** (agent calls gpt-image-2 directly, drops PNGs into `runs/<id>/looks/`): the agent runs `verify-face.py` after each generation, before writing the `.lookbook_id` marker. Marker = "this image is verified-canonical."
+- **Headless flow** (`scripts/run-headless-lookbook.py --tier premium --resume-build`): the orchestrator runs `verify-face.py` against every `look<N>.png` in `runs/<id>/looks/` automatically before consuming them. Failures emit a `❌ BLOCKER: face drift on look<N>` summary with the rubric scores; the agent can then regenerate that one look and re-resume.
+- **Optional gate**: invoke with `--no-verify` when the customer has explicitly opted out (e.g., they're iterating on prompts and want fast feedback). Default is verify-on.
 
 ## Disclosure
 

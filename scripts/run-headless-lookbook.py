@@ -74,8 +74,16 @@ Run states (first line of stdout + first line of summary.md):
                                     deterministic chain because the prompt
                                     template is taste-aware.)
   ❌ BLOCKER: <reason>            — fail-closed at fetch / discover / curate
-                                    / build / validate-local / deploy /
-                                    validate-deployed.
+                                    / build / verify-face / validate-local /
+                                    deploy / validate-deployed.
+
+Premium-tier face-verification gate:
+  Premium-tier --resume-build runs the generated PNGs through
+  scripts/verify-face.py against the customer's reference_photos before
+  consumption. A failed face → BLOCKER summary naming which look
+  failed and the rubric reason. Override with --no-verify (not
+  recommended). See references/image-generation.md § "Face
+  verification gate".
 
 Examples:
   # Weekly newsletter (Editorial tier; honors profile gate for deploy)
@@ -148,6 +156,10 @@ ap.add_argument("--resume-build",action="store_true",
 ap.add_argument("--lookbook-id", type=str,
                 help="Override the auto-derived lookbook_id. Default: weekly = "
                      "<YYYY>-weekly-<ISO_week>; event = <YYYY-MM-DD>-<title-slug>.")
+ap.add_argument("--no-verify", action="store_true",
+                help="Skip the face-verification gate on Premium-tier resume "
+                     "builds. Default is verify-on. See references/image-"
+                     "generation.md § \"Face verification gate\".")
 args = ap.parse_args()
 
 args.runs_dir.mkdir(parents=True, exist_ok=True)
@@ -411,6 +423,60 @@ if tier == "premium":
         write_summary(run_dir, body)
         sys.exit(0)
     build_args += ["--look-images", str(looks_dir)]
+
+    # Face-verification gate (references/image-generation.md § "Face
+    # verification gate"). Premium-tier outputs run through verify-face.py
+    # against the customer's reference photos before consumption. A single
+    # off-putting AI-face shipped to the customer is the trust-damaging
+    # failure this whole pipeline is built to prevent.
+    if not args.no_verify and reference_photos and openai_key_set:
+        verify_failures = []
+        for png in sorted(looks_dir.glob("look*.png")):
+            v = subprocess.run(
+                ["python3", str(ROOT / "verify-face.py"),
+                 "--generated", str(png),
+                 *sum([["--reference", rp] for rp in reference_photos], [])],
+                capture_output=True, text=True,
+            )
+            if v.returncode == 1:
+                # Try to surface the rubric reason from the JSON
+                try:
+                    info = json.loads(v.stdout)
+                    reason = info.get("reason", "(no reason)")
+                    scores = info.get("scores", {})
+                    off_putting = info.get("off_putting", "?")
+                    detail = f"{png.name}: {reason} | scores={scores} | off_putting={off_putting}"
+                except Exception:
+                    detail = f"{png.name}: {v.stdout.strip()[:200]}"
+                verify_failures.append(detail)
+            elif v.returncode == 2:
+                # Inconclusive — surface as a setup error, don't auto-fall-through
+                fail(run_dir, "verify-face",
+                     f"face-verification gate inconclusive for {png.name}: {v.stderr.strip()[:200]}",
+                     tier=tier)
+        if verify_failures:
+            body = (
+                f"# Lookbook run — {today}\n"
+                f"\n"
+                f"❌ BLOCKER: face-verification gate failed on {len(verify_failures)} look(s)\n"
+                f"Tier:  premium\n"
+                f"Stage: verify-face\n"
+                f"\n"
+                f"Failures (most-likely-cause first per look):\n"
+                + "\n".join(f"  - {f}" for f in verify_failures) +
+                f"\n\n"
+                f"Recovery (per references/image-generation.md § \"Recovery flow\"):\n"
+                f"  (a) Regenerate the failed look(s) with a stronger IDENTITY block — move\n"
+                f"      reference photo #1 to position 0 and append the rubric `reason` as a\n"
+                f"      directive. Drop the new PNG into {looks_dir}/ and re-run with\n"
+                f"      --resume-build.\n"
+                f"  (b) Fall back to Editorial tier for this run with --tier editorial.\n"
+                f"  (c) Override the gate (NOT recommended) with --no-verify.\n"
+                f"\n"
+                f"Run dir: {run_dir}\n"
+            )
+            write_summary(run_dir, body)
+            sys.exit(2)
 else:
     build_args += ["--no-tryon"]
 
@@ -432,7 +498,7 @@ page_url = f"https://{project_name}.pages.dev/"
 
 if not auto_publish:
     body = (
-        f"# {json.loads(config_path.read_text())['lookbook_title']} — {today}\n"
+        f"# {json.loads(config_path.read_text())['lookbook_title']}\n"
         f"\n"
         f"📦 READY TO DEPLOY\n"
         f"Tier: {tier.title()}\n"

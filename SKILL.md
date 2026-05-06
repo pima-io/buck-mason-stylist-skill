@@ -1,7 +1,7 @@
 ---
 name: buck-mason-stylist
 description: Personal shopping skill for Buck Mason. Stock-checks (online + nearby store), wardrobe gap analysis, season- and event-aware outfit suggestions, AI try-on lookbooks, and one-shot cart + checkout. Customer brings sizes once; the agent reuses them across requests.
-version: 0.4.0
+version: 0.5.0
 license: MIT
 authors:
   - Buck Mason / Pima
@@ -298,4 +298,5 @@ When choosing or recommending items, weight by (in this order):
 - `scripts/validate-lookbook.py` — runs `references/acceptance-checklist.md`. Pass `--dir <local>` and/or `--url <deployed>`.
 - `scripts/score-calendar-event.py` — implements `references/event-suitability.md`. JSON in, `{score, breakdown, action}` out.
 - `scripts/discover-weekly-candidates.py` — surfaces recently-live + previously-unproposed products for the recurring weekly newsletter (`references/headless-mode.md` § "Recurring weekly newsletter"). Dedupes against `~/.buck-mason-stylist/wishlist.jsonl`.
-- **`scripts/run-headless-lookbook.py`** — single canonical headless invocation. Composes score (event mode) → discover → curate → build → deploy → validate → wishlist append → run summary. Use `--weekly` or `--event <path>`. Respects the `preferred_lookbook_host_auto` deploy gate.
+- **`scripts/run-headless-lookbook.py`** — single canonical headless invocation. Composes score (event mode) → discover → curate → build → deploy → validate → wishlist append → run summary. Use `--weekly` or `--event <path>`. Respects the `preferred_lookbook_host_auto` deploy gate. Premium-tier resume builds run the face-verification gate automatically.
+- `scripts/verify-face.py` — face-verification gate for Premium-tier outputs. GPT-4o-vision call + strict rubric (hair / beard / eye color / skin tone / age / asymmetry / off_putting AI-generic look). Exit 0 pass, 1 fail, 2 inconclusive. Spec in `references/image-generation.md` § "Face verification gate."

@@ -85,6 +85,7 @@ See `examples/stock-check.md` and `examples/lookbook.md` for full walkthroughs.
 | `scripts/score-calendar-event.py` | Implements `references/event-suitability.md` for calendar-driven invocations |
 | `scripts/discover-weekly-candidates.py` | Surfaces recently-live + previously-unproposed products for the weekly newsletter — dedupes against the long-term wishlist |
 | `scripts/run-headless-lookbook.py` | Canonical end-to-end orchestrator (score → discover → curate → build → deploy → validate → summary) |
+| `scripts/verify-face.py` | Face-verification gate for Premium-tier outputs — GPT-4o-vision rubric against the customer's reference photos |
 | `PUBLISHING.md` | ClawHub distribution path |
 | `SECURITY.md` | Threat model, data flows, opt-in capability matrix, vulnerability reporting |
 
