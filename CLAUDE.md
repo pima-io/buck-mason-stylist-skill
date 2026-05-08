@@ -170,6 +170,13 @@ When making changes via Claude Code itself, expect these to be blocked by defaul
 - Reading `.env` files outside the working tree — blocked unless using the `Read` tool (not Bash `cat`/`grep`).
 - Writing `.claude/settings.local.json` to grant the agent its own future permissions — flagged as Self-Modification.
 
+### Scanner-tripwire patterns to avoid
+
+Two patterns in this skill's history have tripped automated scanners that aren't actual security issues — call them out so we don't reintroduce them:
+
+- **Inline `\x..` escape sequences in Python sources** trip ClawHub's static-analysis scanner as `suspicious.obfuscated_code` even when they're plain test fixtures (e.g. a minimal JPEG header). Move multi-byte literals to a real file under `tests/fixtures/` and `shutil.copy` them in. Done in v0.6.5 for the JPEG SOI/JFIF/EOI fixture used by `test_validate_lookbook.py` and `test_verify_face.py`.
+- **Unicode zero-width / format / bidi codepoints** (U+200B, U+202A–U+202E, U+2060–U+2064, U+FEFF, etc.) anywhere in markdown/JSON/YAML trip ClawScan's `unicode-control-chars` prompt-injection detector and force the verdict to "Review" regardless of the actual content. Don't paste content that may carry zero-widths from Slack / Notion / Google Docs into reference docs without stripping. A one-liner check before publish: `python3 -c "import sys, pathlib; cps={*range(0x200B,0x2010),*range(0x202A,0x202F),*range(0x2060,0x2065),0xFEFF,0x2028,0x2029}; [print(p, ln, repr(c)) for p in pathlib.Path('.').rglob('*') if p.is_file() and p.suffix in {'.md','.json','.yaml','.yml','.txt','.py'} for ln,line in enumerate(p.read_text(errors='ignore').splitlines(),1) for c in line if ord(c) in cps]"`.
+
 ### Security review floor
 
 VirusTotal Code Insight will land any skill with **payments + photo upload + PII files** at "Review / suspicious" by default — that's the floor for the capability surface, not a defect. `SECURITY.md` softens the verdict by making the threat model explicit (data-flow table, opt-in matrix, "what the skill DOES NOT do") but doesn't clear it. ClawScan likewise flags MPP + magic-link as Notes/Concerns even when guardrails are correct. The right response is to keep guardrails honest and document them, not to chase a "clean" rating that isn't achievable for this capability set.

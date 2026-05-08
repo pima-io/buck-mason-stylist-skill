@@ -239,7 +239,7 @@ Plus a one-line stderr summary at end-of-run:
 - **Phase consistently slow** — grep across many runs:
   ```bash
   jq -s 'map(select(.phase == "discover_candidates")) | sort_by(.duration_s) | reverse | .[0:5]' \
-    ~/.buck-mason-stylist/runs/*/​_timings.jsonl
+    ~/.buck-mason-stylist/runs/*/_timings.jsonl
   ```
 - **Phase failed** — entries with `"ok": false` carry an `error` field with the exception class + first 200 chars. Same data shows in `_run.log` with a `✗` mark.
 

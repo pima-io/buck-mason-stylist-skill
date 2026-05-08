@@ -5,18 +5,16 @@ parsing + server-side override of the model's overall_pass without
 spending money or needing network. Uses a HTTP server fixture rather
 than monkey-patching urllib because the script invokes urllib directly.
 """
-import http.server, json, os, pathlib, struct, subprocess, threading, time
+import http.server, json, os, pathlib, shutil, subprocess, threading, time
 
 REPO_ROOT      = pathlib.Path(__file__).resolve().parent.parent
 VERIFY_SCRIPT  = REPO_ROOT / "scripts" / "verify-face.py"
+MINIMAL_JPEG   = REPO_ROOT / "tests" / "fixtures" / "minimal.jpg"
 
 
 def _make_minimal_image(path: pathlib.Path):
-    """Tiny JPEG so the file can be base64-encoded into the request."""
-    payload = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-    payload += b"\x00" * 200
-    payload += b"\xff\xd9"
-    path.write_bytes(payload)
+    """Copy the bundled minimal JPEG fixture so the file can be base64-encoded into the request."""
+    shutil.copy(MINIMAL_JPEG, path)
 
 
 class _FakeOpenAIHandler(http.server.BaseHTTPRequestHandler):

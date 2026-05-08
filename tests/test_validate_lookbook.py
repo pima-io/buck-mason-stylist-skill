@@ -4,10 +4,11 @@ Builds synthetic deploy directories that should pass / fail each local
 gate (L1-L10) and asserts the right exit code. Deployed checks (D1-D6)
 are not exercised here — they require a live URL.
 """
-import pathlib, subprocess, struct
+import pathlib, shutil, subprocess
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 VALIDATE_SCRIPT = REPO_ROOT / "scripts" / "validate-lookbook.py"
+MINIMAL_JPEG = REPO_ROOT / "tests" / "fixtures" / "minimal.jpg"
 
 
 def run_validate(dir_path) -> subprocess.CompletedProcess:
@@ -18,14 +19,16 @@ def run_validate(dir_path) -> subprocess.CompletedProcess:
 
 
 def write_minimal_jpeg(path: pathlib.Path, size_bytes: int = 200) -> None:
-    """Write a tiny but technically-valid JPEG so file-size + mimetype
-    checks pass. Not a real image — validate-lookbook only stats the file
-    and inspects the MIME via the extension."""
-    # Smallest valid JPEG: SOI (FFD8) + EOI (FFD9) + filler.
-    payload = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-    payload += b"\x00" * max(0, size_bytes - len(payload) - 2)
-    payload += b"\xff\xd9"
-    path.write_bytes(payload)
+    """Copy the bundled minimal-but-valid JPEG fixture to the test path.
+
+    The fixture (`tests/fixtures/minimal.jpg`, 222 bytes) is a real
+    SOI/JFIF/EOI-framed JPEG. Validate-lookbook only stats the file size
+    and inspects the MIME via the extension, so any compliant JPEG works;
+    `size_bytes` is accepted for backwards compatibility with older calls
+    but ignored — pad in the caller if a specific size matters.
+    """
+    shutil.copy(MINIMAL_JPEG, path)
+    _ = size_bytes  # unused; kept for signature compatibility
 
 
 def good_html(extra_meta: str = "") -> str:
