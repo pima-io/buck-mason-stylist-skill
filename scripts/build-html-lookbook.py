@@ -169,17 +169,23 @@ for p in PICKS:
     p["thumb_path"] = f"thumb-{p['id']}.jpg"
     thumb(src_url, OUT / p["thumb_path"], w=240)
 
-# og.jpg (1200×630, white-letterboxed from look 1's hero or first piece's image)
+# og.jpg — preserve the hero's native aspect ratio (do NOT letterbox onto a
+# 1200×630 landscape canvas). Portrait/square OG images render as the "tall"
+# image-dominant card in iMessage/Apple Messages, filling the bubble width;
+# a portrait subject pasted into a landscape canvas produces a centered photo
+# with white side-bars, which is the broken-looking variant. Fit the longest
+# side to 1200px (FB recommends ≥1200px on the wide axis).
+OG_W, OG_H = 1200, 630   # fallback if there's no hero (legacy default)
 first_look_id = CFG["looks"][0]["id"] if CFG.get("looks") else None
 hero_name = look_hero.get(first_look_id) if first_look_id else None
 cover_src = (OUT / hero_name) if hero_name else None
 if cover_src and cover_src.is_file():
     cover = Image.open(cover_src).convert("RGB")
-    canvas = Image.new("RGB", (1200, 630), (255, 255, 255))
-    ratio = min(1200 / cover.width, 630 / cover.height)
-    nw, nh = int(cover.width * ratio), int(cover.height * ratio)
-    canvas.paste(cover.resize((nw, nh), Image.LANCZOS), ((1200 - nw) // 2, (630 - nh) // 2))
-    canvas.save(OUT / "og.jpg", "JPEG", quality=85, optimize=True)
+    ratio = 1200 / max(cover.width, cover.height)
+    OG_W, OG_H = int(cover.width * ratio), int(cover.height * ratio)
+    cover.resize((OG_W, OG_H), Image.LANCZOS).save(
+        OUT / "og.jpg", "JPEG", quality=85, optimize=True
+    )
 
 # ── HTML render ──────────────────────────────────────────────────────────────
 
@@ -257,8 +263,8 @@ PAGE = f'''<!doctype html>
   <meta property="og:description" content="{html.escape(SUBTITLE)}">
   <meta property="og:url" content="{PAGE_URL}">
   <meta property="og:image" content="{OG_IMAGE_URL}">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
+  <meta property="og:image:width" content="{OG_W}">
+  <meta property="og:image:height" content="{OG_H}">
   <meta property="og:image:alt" content="Buck Mason lookbook — {html.escape(LOOKBOOK_TITLE)}">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{html.escape(LOOKBOOK_TITLE)}">
