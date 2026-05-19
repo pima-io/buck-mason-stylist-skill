@@ -19,7 +19,7 @@
       "type": "string",
       "enum": ["unconfirmed", "confirmed", "none"],
       "default": "unconfirmed",
-      "description": "Customer's Stripe Link wallet readiness. `confirmed` means a payment method is linked and MPP fully-agent-driven checkout is reachable. `none` = customer doesn't have Link or doesn't want to use it; default to the Shopify cart-link path. `unconfirmed` triggers the agent to ask once on first lookbook."
+      "description": "Customer's Stripe Link wallet readiness. `confirmed` means a payment method is linked and MPP fully-agent-driven checkout is reachable, so lookbooks can use html-cart. `none` = customer doesn't have Link or doesn't want to use it; use hosted read-only html plus voting and default purchases to the Shopify cart-link path. `unconfirmed` triggers the agent to ask once on first lookbook."
     },
 
     "preferred_lookbook_host": {
@@ -45,6 +45,11 @@
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
       "description": "Customer-namespaced prefix for permanent-URL Pages projects. Final pattern: `<prefix>-<lookbook-id>`. Default if unset: `buckmason-<email-handle>`. See references/hosting-options.md § \"URL stability\"."
+    },
+    "lookbook_votes_kv_id": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Za-z0-9_-]*$",
+      "description": "Cloudflare KV namespace id for default lookbook voting on Pages deploys. Create once with `CLOUDFLARE_ACCOUNT_ID=<acct> wrangler kv namespace create LOOKBOOK_VOTES`; the deploy wrapper also accepts LOOKBOOK_VOTES_KV_ID."
     },
     "weekly_lookbook_cadence": {
       "type": "string",

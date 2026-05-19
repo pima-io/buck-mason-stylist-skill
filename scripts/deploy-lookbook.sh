@@ -2,7 +2,7 @@
 # Deploy a built lookbook directory to Cloudflare Pages.
 #
 # Usage:
-#   scripts/deploy-lookbook.sh <deploy-dir> <project-name> [--auto]
+#   scripts/deploy-lookbook.sh <deploy-dir> <project-name> [flags]
 #
 # What it does:
 #   1. Probes wrangler auth — fails loudly if unauthenticated.
@@ -10,16 +10,26 @@
 #      has profile.md → preferred_lookbook_host_auto: true).
 #   3. Idempotently creates the Pages project (Wrangler v4+ requires this
 #      before first `pages deploy`).
-#   4. Runs scripts/validate-lookbook.py against the local artifact.
-#   5. Deploys.
-#   6. Runs scripts/validate-lookbook.py against the deployed URL.
-#   7. Prints the URL.
+#   4. (default) Bakes the voting capability into the deploy dir:
+#         functions/api/vote.js + votes.js + wrangler.toml + favicons +
+#         injects the thumbs-UI into index.html. Opt out via --no-voting.
+#   5. Runs scripts/validate-lookbook.py against the local artifact.
+#   6. Deploys.
+#   7. Runs scripts/validate-lookbook.py against the deployed URL + smoke-
+#      tests /api/votes when voting is on.
+#   8. Prints the URL.
 #
-# Flags:
-#   --auto    Skip the per-publish confirmation prompt. The caller is
-#             responsible for verifying preferred_lookbook_host_auto: true
-#             upstream — this flag is just the wire.
-#   --dry-run Build + validate locally; don't actually deploy.
+# Voting (on by default):
+#   The deploy wraps the static lookbook with a thumbs up/down vote form per
+#   look + per item. Needs a Cloudflare KV namespace id (one per account,
+#   reused across lookbooks). Resolution order:
+#     1. --kv-id <id>
+#     2. $LOOKBOOK_VOTES_KV_ID env var
+#     3. profile.md → lookbook_votes_kv_id (caller passes via --kv-id)
+#   No id → the script errors out with the one-line `wrangler kv namespace
+#   create` incantation. Suppress voting entirely with --no-voting.
+#
+#   Full architecture, schema, and security model: references/voting.md.
 
 set -euo pipefail
 
@@ -28,7 +38,7 @@ show_help() {
 Usage: scripts/deploy-lookbook.sh <deploy-dir> <project-name> [flags]
 
 Deploys a built lookbook directory to Cloudflare Pages with probe + idempotent
-project-create + local + deployed validation gates.
+project-create + local + deployed validation gates. Voting is on by default.
 
 Arguments:
   <deploy-dir>      Local directory containing index.html + og.jpg + assets.
@@ -46,6 +56,19 @@ Flags:
                     so the stable alias URL is permanent. See
                     references/hosting-options.md § "URL stability".
   --dry-run         Build + run local validation; skip the actual deploy.
+  --with-voting     Bake the voting capability (thumbs UI + Pages Functions
+                    + KV binding) into the deploy. **On by default.**
+                    Spec: references/voting.md.
+  --no-voting       Suppress the voting capability — deploy a read-only
+                    static lookbook with no /api/* endpoints and no form.
+  --kv-id <id>      Cloudflare KV namespace id for vote storage. Required
+                    when voting is on; create one once per account with:
+                      CLOUDFLARE_ACCOUNT_ID=<acct> wrangler kv namespace create LOOKBOOK_VOTES
+                    Resolution: --kv-id > $LOOKBOOK_VOTES_KV_ID env > error.
+  --lookbook-id <s> Stable id used as the LOOKBOOK_ID env var inside the
+                    Pages Functions (scopes the KV key prefix). Resolution:
+                    --lookbook-id > <deploy-dir>/.lookbook_id > <project-name>
+                    with the "buckmason-" prefix stripped.
   -h, --help        Show this help and exit.
 
 Exit codes:
@@ -54,14 +77,20 @@ Exit codes:
   2  invalid arguments
   3  wrangler missing or unauthenticated
   4  --no-overwrite set but project has prior deployments
+  5  voting on but no KV namespace id resolvable
   (validate failures bubble through the underlying validate-lookbook.py exit
   codes; see scripts/validate-lookbook.py --help)
 
 Examples:
-  # Test/iteration deploy (single shared project, freely overwritten):
-  bash scripts/deploy-lookbook.sh ./deploy buckmason-stylist-test
+  # Default: voting baked in (needs $LOOKBOOK_VOTES_KV_ID set or --kv-id):
+  bash scripts/deploy-lookbook.sh ./deploy buckmason-stylist-test \
+       --kv-id 0e0b9122c04141f8b79b43d1081b3697
 
-  # Production weekly newsletter (each lookbook gets a permanent project):
+  # Read-only static lookbook (no voting, no /api):
+  bash scripts/deploy-lookbook.sh ./deploy buckmason-stylist-test --no-voting
+
+  # Production weekly newsletter (permanent project + voting on):
+  LOOKBOOK_VOTES_KV_ID=0e0b9122c04141f8b79b43d1081b3697 \
   bash scripts/deploy-lookbook.sh \
        ~/.buck-mason-stylist/runs/2026-weekly-19/deploy \
        buckmason-nick-2026-weekly-19 \
@@ -81,18 +110,28 @@ PROJECT="${2:-}"
 AUTO=0
 DRY_RUN=0
 NO_OVERWRITE=0
+WITH_VOTING=1                              # default on
+KV_ID="${LOOKBOOK_VOTES_KV_ID:-}"
+LOOKBOOK_ID=""
 shift 2 || true
-for arg in "$@"; do
-  case "$arg" in
-    --auto)         AUTO=1 ;;
-    --dry-run)      DRY_RUN=1 ;;
-    --no-overwrite) NO_OVERWRITE=1 ;;
-    *) echo "unknown flag: $arg" >&2; exit 2 ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --auto)            AUTO=1;          shift ;;
+    --dry-run)         DRY_RUN=1;       shift ;;
+    --no-overwrite)    NO_OVERWRITE=1;  shift ;;
+    --with-voting)     WITH_VOTING=1;   shift ;;
+    --no-voting)       WITH_VOTING=0;   shift ;;
+    --kv-id)           KV_ID="$2";      shift 2 ;;
+    --kv-id=*)         KV_ID="${1#*=}"; shift ;;
+    --lookbook-id)     LOOKBOOK_ID="$2";      shift 2 ;;
+    --lookbook-id=*)   LOOKBOOK_ID="${1#*=}"; shift ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
 done
 
 if [ -z "$DEPLOY_DIR" ] || [ -z "$PROJECT" ]; then
-  echo "usage: $0 <deploy-dir> <project-name> [--auto] [--dry-run]" >&2
+  echo "usage: $0 <deploy-dir> <project-name> [flags]" >&2
+  echo "       --help for full reference" >&2
   exit 2
 fi
 if [ ! -d "$DEPLOY_DIR" ]; then
@@ -103,6 +142,10 @@ if [ ! -f "$DEPLOY_DIR/index.html" ]; then
   echo "error: $DEPLOY_DIR has no index.html — run scripts/build-html-lookbook.py first" >&2
   exit 2
 fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+TEMPLATES="$SKILL_ROOT/templates/voting"
 
 # 1. Probe wrangler auth.
 if ! command -v wrangler >/dev/null 2>&1; then
@@ -121,6 +164,11 @@ if [ $AUTO -eq 0 ] && [ $DRY_RUN -eq 0 ]; then
   echo
   echo "About to deploy '$DEPLOY_DIR' to: $PAGE_URL"
   echo "This URL will be public (anyone with the link can view)."
+  if [ $WITH_VOTING -eq 1 ]; then
+    echo "Voting is ENABLED (--with-voting default). Anyone with the URL can submit votes."
+  else
+    echo "Voting is DISABLED (--no-voting)."
+  fi
   printf "Proceed? [y/N] "
   read -r answer
   case "$answer" in
@@ -133,11 +181,6 @@ fi
 if wrangler pages project list 2>/dev/null | grep -qE "(^|[[:space:]])${PROJECT}([[:space:]]|$)"; then
   echo "✓ Pages project exists: $PROJECT"
   if [ $NO_OVERWRITE -eq 1 ]; then
-    # The customer-facing URL stability rule: refuse to deploy if the project
-    # already has a deployment, so a permanent lookbook URL never gets
-    # silently overwritten. See references/hosting-options.md § "URL stability".
-    # wrangler 4.x prints deployments as a Unicode box-drawing table; each
-    # data row contains a UUID. Count UUIDs to count deployments.
     deploy_count=$(wrangler pages deployment list --project-name "$PROJECT" 2>/dev/null \
                    | grep -cE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' || echo 0)
     if [ "$deploy_count" -gt 0 ]; then
@@ -152,8 +195,58 @@ else
   wrangler pages project create "$PROJECT" --production-branch main
 fi
 
-# 4. Local validation.
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# 4. Bake voting into the deploy dir (default; --no-voting suppresses).
+if [ $WITH_VOTING -eq 1 ]; then
+  if [ -z "$KV_ID" ]; then
+    cat <<EOF >&2
+error: voting is enabled but no KV namespace id resolvable.
+
+Provide via one of (highest precedence first):
+  --kv-id <namespace-id>
+  LOOKBOOK_VOTES_KV_ID=<namespace-id> $0 ...
+
+To create the namespace (once per Cloudflare account):
+  CLOUDFLARE_ACCOUNT_ID=<account-id> wrangler kv namespace create LOOKBOOK_VOTES
+Save the returned id in profile.md as 'lookbook_votes_kv_id:' for reuse.
+
+Or pass --no-voting to deploy a read-only static lookbook.
+EOF
+    exit 5
+  fi
+  # Resolve LOOKBOOK_ID: flag > marker file > project-name-derived.
+  if [ -z "$LOOKBOOK_ID" ]; then
+    if [ -f "$DEPLOY_DIR/.lookbook_id" ]; then
+      LOOKBOOK_ID="$(tr -d '[:space:]' < "$DEPLOY_DIR/.lookbook_id")"
+    else
+      LOOKBOOK_ID="${PROJECT#buckmason-}"
+    fi
+  fi
+  echo "✓ voting on — KV id: ${KV_ID:0:8}... · lookbook_id: $LOOKBOOK_ID"
+
+  # 4a. Copy Pages Functions
+  mkdir -p "$DEPLOY_DIR/functions/api"
+  cp "$TEMPLATES/functions-api-vote.js"  "$DEPLOY_DIR/functions/api/vote.js"
+  cp "$TEMPLATES/functions-api-votes.js" "$DEPLOY_DIR/functions/api/votes.js"
+
+  # 4b. Render wrangler.toml from template (sed-substitute placeholders).
+  sed -e "s|<PROJECT_NAME>|$PROJECT|g" \
+      -e "s|<LOOKBOOK_ID>|$LOOKBOOK_ID|g" \
+      -e "s|<KV_NAMESPACE_ID>|$KV_ID|g" \
+      "$TEMPLATES/wrangler.toml.example" > "$DEPLOY_DIR/wrangler.toml"
+
+  # 4c. Pull Buck Mason favicons (idempotent — skip if already present).
+  if [ ! -f "$DEPLOY_DIR/favicon.ico" ]; then
+    curl -sS -o "$DEPLOY_DIR/favicon-32.png"       "https://www.buckmason.com/favicon-32x32.png"  || true
+    curl -sS -o "$DEPLOY_DIR/favicon-16.png"       "https://www.buckmason.com/icons/icon-48x48.png" || true
+    curl -sS -o "$DEPLOY_DIR/apple-touch-icon.png" "https://www.buckmason.com/icons/icon-192x192.png" || true
+    curl -sS -o "$DEPLOY_DIR/favicon.ico"          "https://www.buckmason.com/favicon.ico"        || true
+  fi
+
+  # 4d. Inject thumbs UI + favicon link tags into index.html.
+  python3 "$SCRIPT_DIR/inject-voting-ui.py" --deploy-dir "$DEPLOY_DIR"
+fi
+
+# 5. Local validation.
 echo
 echo "Running local validation..."
 python3 "$SCRIPT_DIR/validate-lookbook.py" --dir "$DEPLOY_DIR"
@@ -165,23 +258,39 @@ if [ $DRY_RUN -eq 1 ]; then
   exit 0
 fi
 
-# 5. Deploy.
+# 6. Deploy.
 echo
 echo "Deploying..."
-wrangler pages deploy "$DEPLOY_DIR" \
-  --project-name "$PROJECT" \
-  --branch main \
-  --commit-dirty=true
+if [ $WITH_VOTING -eq 1 ]; then
+  # cd into the deploy dir so wrangler picks up our wrangler.toml + functions/.
+  ( cd "$DEPLOY_DIR" && wrangler pages deploy . \
+      --project-name "$PROJECT" \
+      --branch main \
+      --commit-dirty=true )
+else
+  wrangler pages deploy "$DEPLOY_DIR" \
+    --project-name "$PROJECT" \
+    --branch main \
+    --commit-dirty=true
+fi
 
 # Give the CDN a few seconds to propagate before we curl it.
 sleep 3
 
-# 6. Deployed validation.
+# 7. Deployed validation + voting smoke-test.
 echo
 echo "Running deployed validation against: $PAGE_URL"
 python3 "$SCRIPT_DIR/validate-lookbook.py" --url "$PAGE_URL"
 echo "✓ deployed validation passed"
 
-# 7. Print URL (the only thing that goes to stdout for headless callers).
+if [ $WITH_VOTING -eq 1 ]; then
+  if curl -sS -o /dev/null -w "%{http_code}" "${PAGE_URL}api/votes" | grep -q '^200$'; then
+    echo "✓ voting endpoint live: ${PAGE_URL}api/votes"
+  else
+    echo "warn: voting endpoint did not return 200 (cold-start can take a few seconds)" >&2
+  fi
+fi
+
+# 8. Print URL (the only thing that goes to stdout for headless callers).
 echo
 echo "$PAGE_URL"

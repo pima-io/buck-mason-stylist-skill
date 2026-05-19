@@ -3,7 +3,8 @@
 
 Composes the deterministic chain:
   score (event-driven only) → discover candidates → curate
-  → build (Editorial tier by default) → deploy (gated on _auto)
+  → build (Premium for one-shot/event when available; weekly Editorial by default)
+  → deploy with voting (gated on _auto)
   → validate → write summary
 
 Spec: references/headless-mode.md § "The end-to-end orchestrator".
@@ -26,15 +27,17 @@ Common args
   --profile <path>         profile.md (or YAML/JSON sibling). Reads sizes,
                            gender, ethos, link_payment_method,
                            preferred_lookbook_host*, weekly_lookbook_*,
-                           lookbook_project_prefix, notify_url.
+                           lookbook_project_prefix, lookbook_votes_kv_id,
+                           notify_url.
 
   --runs-dir <path>        Default ~/.buck-mason-stylist/runs/
   --wishlist <path>        Default ~/.buck-mason-stylist/wishlist.jsonl
   --max-pieces N           Default 6; cap on candidates picked
   --tier <auto|editorial|premium>
-                           Default `auto` — picks Premium if event scores
-                           ≥9 AND OPENAI_API_KEY present AND ≥2 reference
-                           photos exist. Else Editorial. `--tier editorial`
+                           Default `auto` — one-shot/event runs pick Premium
+                           when OPENAI_API_KEY is present and ≥2 reference
+                           photos exist. Weekly runs stay Editorial unless
+                           weekly_lookbook_tier: premium. `--tier editorial`
                            or `--tier premium` forces.
 
 Premium tier note
@@ -233,8 +236,8 @@ mode.add_argument("--event",  type=pathlib.Path,
 ap.add_argument("--profile",     type=pathlib.Path, required=True,
                 help="Path to the customer's profile.md. Reads gender, sizes, "
                      "style_ethos, link_payment_method, preferred_lookbook_host*, "
-                     "weekly_lookbook_*, lookbook_project_prefix, notify_url, "
-                     "reference_photos.")
+                     "weekly_lookbook_*, lookbook_project_prefix, "
+                     "lookbook_votes_kv_id, notify_url, reference_photos.")
 ap.add_argument("--runs-dir",    type=pathlib.Path,
                 default=pathlib.Path.home() / ".buck-mason-stylist/runs",
                 help="Where per-lookbook run directories live "
@@ -247,10 +250,11 @@ ap.add_argument("--wishlist",    type=pathlib.Path,
 ap.add_argument("--max-pieces",  type=int, default=6,
                 help="Cap on the number of pieces in the lookbook (default: 6).")
 ap.add_argument("--tier",        choices=["auto", "editorial", "premium"], default="auto",
-                help="auto = Premium when event scores ≥9 + OPENAI_API_KEY + "
-                     "≥2 reference photos, else Editorial. editorial = no AI "
-                     "try-on (fast, cheap, recommended for recurring runs). "
-                     "premium = gpt-image-2 try-on per look (~$0.40/run).")
+                help="auto = Premium for one-shot/event runs when OPENAI_API_KEY "
+                     "+ ≥2 reference photos are present; weekly runs stay "
+                     "Editorial unless weekly_lookbook_tier: premium. "
+                     "editorial = no AI try-on. premium = gpt-image-2 try-on "
+                     "per look (~$0.40/run).")
 ap.add_argument("--resume-build",action="store_true",
                 help="Skip discover/curate; re-enter the build step using the "
                      "existing run directory. Pair with --tier premium after "
@@ -276,6 +280,8 @@ ethos                = profile.get("style_ethos", "")
 favorites            = profile.get("favorites") or ""
 auto_publish         = bool(profile.get("preferred_lookbook_host_auto", False))
 project_prefix       = profile.get("lookbook_project_prefix") or "buckmason"
+weekly_tier          = str(profile.get("weekly_lookbook_tier") or "editorial").lower()
+lookbook_votes_kv_id = str(profile.get("lookbook_votes_kv_id") or os.environ.get("LOOKBOOK_VOTES_KV_ID") or "")
 home_zip             = profile.get("home_zip", "")
 reference_photos     = profile.get("reference_photos", [])
 openai_key_set       = bool(os.environ.get("OPENAI_API_KEY"))
@@ -358,7 +364,11 @@ candidates_path = run_dir / "candidates.json"
 def derive_tier() -> str:
     if args.tier != "auto":
         return args.tier
-    if event_score and event_score >= 9 and openai_key_set and len(reference_photos) >= 2:
+    if args.weekly:
+        if weekly_tier == "premium" and openai_key_set and len(reference_photos) >= 2:
+            return "premium"
+        return "editorial"
+    if openai_key_set and len(reference_photos) >= 2:
         return "premium"
     return "editorial"
 
@@ -585,6 +595,11 @@ project_name = f"{project_prefix}-{lookbook_id}"
 page_url = f"https://{project_name}.pages.dev/"
 
 if not auto_publish:
+    kv_arg = f" --kv-id {lookbook_votes_kv_id}" if lookbook_votes_kv_id else " --kv-id <lookbook_votes_kv_id>"
+    voting_note = (
+        f"Voting: enabled by default. "
+        f"{'KV id resolved from profile/env.' if lookbook_votes_kv_id else 'Set profile.md → lookbook_votes_kv_id or LOOKBOOK_VOTES_KV_ID before publishing.'}\n"
+    )
     body = (
         f"# {json.loads(config_path.read_text())['lookbook_title']}\n"
         f"\n"
@@ -592,19 +607,23 @@ if not auto_publish:
         f"Tier: {tier.title()}\n"
         f"Looks: {len(json.loads(config_path.read_text())['looks'])}\n"
         f"Pieces: {len(json.loads(picks_path.read_text()))}\n"
+        f"{voting_note}"
         f"\n"
         f"Run dir: {run_dir}\n"
         f"\n"
         f"To publish, set profile.md → preferred_lookbook_host_auto: true\n"
         f"or run interactively:\n"
-        f"  bash scripts/deploy-lookbook.sh {deploy_dir} {project_name} --no-overwrite\n"
+        f"  bash scripts/deploy-lookbook.sh {deploy_dir} {project_name} --no-overwrite{kv_arg}\n"
     )
     write_summary(run_dir, body)
     sys.exit(0)
 
 with timings.phase("deploy", project=project_name):
+    deploy_cmd = ["bash", str(ROOT / "deploy-lookbook.sh"), str(deploy_dir), project_name, "--auto", "--no-overwrite"]
+    if lookbook_votes_kv_id:
+        deploy_cmd += ["--kv-id", lookbook_votes_kv_id]
     deploy_p = subprocess.run(
-        ["bash", str(ROOT / "deploy-lookbook.sh"), str(deploy_dir), project_name, "--auto", "--no-overwrite"],
+        deploy_cmd,
         capture_output=True, text=True,
     )
 if deploy_p.returncode != 0:
@@ -656,6 +675,7 @@ body = (
     f"\n"
     f"Notes\n"
     + (f"- Event score: {event_score} ({event_label})\n" if event_score is not None else "")
+    + f"- Voting tally: {page_url}api/votes\n"
     + f"- Run dir: {run_dir}\n"
     f"\n"
     f"Verify: https://www.opengraph.xyz/url/{urllib.parse.quote(page_url, safe='')}\n"

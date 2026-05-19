@@ -23,21 +23,22 @@ GitHub issue.
   ever holds a one-time, short-lived **Stripe Shared Payment Token** minted
   by the customer push-approving the spend in their own Link wallet. The
   push-approval IS the consent. SPTs are never written to disk.
-- **The OpenAI key is required only for the try-on lookbook workflow.** All
-  other workflows (stock check, recommend, cart, MPP checkout, order
-  tracking, returns) work with no OpenAI key at all.
+- **The OpenAI key is required only for the default Premium lookbook workflow.**
+  All other workflows (stock check, recommend, cart, MPP checkout, order
+  tracking, returns) and fallback lookbook tiers work with no OpenAI key at all.
 
 ## Data flow
 
 | Source | Sink | Trigger | What goes |
 |---|---|---|---|
-| `profile.md` (sizes, build, face, photos) | OpenAI `/v1/images/edits` | Workflow #3 (try-on lookbook) | Reference photos + structured garment + setting prompt. Photos are sent only when the customer asks for a try-on. |
+| `profile.md` (sizes, build, face, photos) | OpenAI `/v1/images/edits` | Workflow #3 (default Premium lookbook / explicit try-on) | Reference photos + structured garment + setting prompt. Photos are sent only when the customer asks for a lookbook/try-on and Premium prerequisites are present. |
 | `profile.md` (size, zip) | `pima.io/mcp/buckmason/*` | Workflows #1, #2, #4 | Just the size + zip — no photos, no contact info, no shipping address. |
 | `profile.md` (shipping, name, email, phone) | `pima.io/mcp/buckmason/checkout` | Workflow #4 step 3 (MPP only, opt-in) | Buyer block sent to Pima for the payment intent. Not sent on cart-link path. |
 | `profile.md` (email) | Customer's own inbox via Pima | Workflow #5c (magic-link, opt-in only) | Email is delivered by Pima to the customer; the agent never sees it unless an explicit email-MCP is authorized in the same turn. |
 | Shopify cart permalink | Customer's browser | Workflow #4 default | URL only; the customer takes it from there. |
 | `wardrobe.md`, `events.md` | Local filesystem only | All workflows that read them | Never sent to any external service. |
-| Generated HTML lookbook | Cloudflare Pages (`*.pages.dev`) via the operator's `wrangler` | `scripts/deploy-lookbook.sh` (opt-in; the operator runs it) | The HTML file + assets. Includes generated try-on imagery if Premium-tier ran. The skill shells out to `wrangler` which uses the operator's pre-existing Cloudflare credentials. **Customer should treat the resulting URL as semi-public** — it is not access-controlled. |
+| Generated HTML lookbook | Cloudflare Pages (`*.pages.dev`) via the operator's `wrangler` | `scripts/deploy-lookbook.sh` (opt-in; the operator runs it) | The HTML file + assets. Includes generated try-on imagery if Premium-tier ran and the default voting UI/Pages Functions unless `--no-voting` is explicit. The skill shells out to `wrangler` which uses the operator's pre-existing Cloudflare credentials. **Customer should treat the resulting URL as semi-public** — it is not access-controlled. |
+| Partner/stakeholder vote form | Cloudflare KV (`LOOKBOOK_VOTES`) via Pages Functions | Default Cloudflare Pages lookbook deploy after the customer/operator provides `lookbook_votes_kv_id` or `$LOOKBOOK_VOTES_KV_ID` | Voter-entered name, thumbs up/down per look/item, free-text comment, timestamp, IP, user agent, and lookbook id. No account login or payment data. |
 | Generated HTML lookbook | Other hosts (Surge, Netlify, Vercel, Gist, S3, 0x0.st, …) | Operator manually runs the alternate CLI per `references/hosting-options.md` | Same payload as above. The skill **does not bundle, install, or invoke** those CLIs — listed in `clawhub.json#permissions.network_alternatives_documented_only` for full disclosure. Same trust model as `@stripe/link-cli`. |
 | `html-cart` selection block (slug + size + qty + lookbook_id) | `~/.buck-mason-stylist/wishlist.jsonl` (local filesystem) | Workflow #4 path B on handoff paste-back and on successful MPP order | Append-only JSONL. Contains slug, size, qty, `lookbook_id`, `price_cents_at_pick`, and (after settlement) `order_id` + `purchased_at`. No card data, no shipping address, no email, no full name. Lives outside the workspace so it persists across agent sessions on the same machine — declared in `clawhub.json#permissions.filesystem`. |
 
@@ -67,9 +68,10 @@ and never to any host outside the four listed in
   `@stripe/link-cli` by its npm scope (verified Stripe publisher) and links
   to the source repo. If you don't want it, leave it uninstalled — the
   default cart-link path will still work.
-- It does **not** keep a long-lived server-side session. There's no
-  database, no key-value store, no queue. Each tool call is a stateless
-  HTTP request to `pima.io` or `api.openai.com`.
+- It does **not** keep a long-lived server-side session. Outside the optional
+  Cloudflare KV voting namespace, there's no database, no queue, and no
+  server-side session. Each commerce/image tool call is a stateless HTTP
+  request to `pima.io` or `api.openai.com`.
 
 ### What an operator opts into
 
@@ -77,10 +79,10 @@ and never to any host outside the four listed in
 |---|---|---|
 | Stock check, recommend, cart link | ✅ on | — |
 | Order tracking via guest order-code | ✅ on | — |
-| AI try-on (sends photos to OpenAI) | ❌ off (requires `OPENAI_API_KEY` and an explicit user ask) | per-conversation |
+| AI try-on (sends photos to OpenAI) | ❌ off in default install; when `OPENAI_API_KEY` is configured, it is the default for unqualified lookbook requests | per-lookbook |
 | MPP fully-agent-driven checkout | ❌ off (requires `@stripe/link-cli` and an explicit user opt-in to agent-driven payment) | per-purchase |
 | Email magic-link account linking | ❌ off | per-conversation, with retrieval method confirmed before sending the email |
-| HTML lookbook deploy to Cloudflare Pages | ❌ off (requires the operator-installed `wrangler` CLI authenticated to the operator's own Cloudflare account) | per-deploy, by running `scripts/deploy-lookbook.sh` |
+| HTML lookbook deploy to Cloudflare Pages + default voting | ❌ off (requires the operator-installed `wrangler` CLI, Cloudflare auth, and a KV namespace id unless `--no-voting` is explicit) | per-deploy, by running `scripts/deploy-lookbook.sh` or headless auto-publish |
 | HTML lookbook deploy to alternate hosts (Surge, Netlify, Vercel, Gist, S3, 0x0.st) | ❌ off (skill never invokes these — operator runs the host's CLI manually) | per-deploy, fully operator-driven |
 
 If the operator wires the skill into an agent without `OPENAI_API_KEY` and
@@ -132,7 +134,7 @@ Network egress (declared in `clawhub.json#permissions.network`):
 
 **Opt-in (only when the operator wires the dependency):**
 - `api.openai.com` — image generation (`gpt-image-2`), try-on workflow only; requires `OPENAI_API_KEY`
-- `api.cloudflare.com` + `*.pages.dev` — HTML lookbook deploy via the operator-installed `wrangler` CLI; requires running `scripts/deploy-lookbook.sh`
+- `api.cloudflare.com` + `*.pages.dev` — HTML lookbook deploy and default voting Pages Functions/KV via the operator-installed `wrangler` CLI; requires running `scripts/deploy-lookbook.sh`
 - `api.stripe.com` — fully-agent-driven MPP checkout; reached only by `@stripe/link-cli`, never by the skill itself
 
 **Documented alternatives (operator's own CLIs, the skill never invokes them):**

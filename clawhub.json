@@ -1,9 +1,9 @@
 {
   "name": "buck-mason-stylist-skill",
   "namespace": "nickmerwin",
-  "version": "0.6.5",
+  "version": "0.7.1",
   "visibility": "public",
-  "description": "Personal shopping skill for Buck Mason \u2014 stock checks, wardrobe gap analysis, AI try-on lookbooks (gpt-image-2), and one-shot cart + checkout (browser link or fully agent-driven via MPP + stripe/link-cli). Talks to the pima.io MCP at /mcp/buckmason/*.",
+  "description": "Personal shopping skill for Buck Mason \u2014 stock checks, wardrobe gap analysis, default gpt-image-2 virtual try-on lookbooks with voting, and one-shot cart + checkout (browser link or fully agent-driven via MPP + stripe/link-cli). Talks to the pima.io MCP at /mcp/buckmason/*.",
   "homepage": "https://github.com/pima-io/buck-mason-stylist-skill",
   "repository": "https://github.com/pima-io/buck-mason-stylist-skill",
   "license": "MIT",
@@ -15,7 +15,7 @@
   "envDetails": {
     "OPENAI_API_KEY": {
       "required": false,
-      "conditional": "Premium-tier lookbook generation only \u2014 workflow #3's gpt-image-2 try-on imagery. Stock checks, wardrobe gap analysis, recommend, cart, MPP checkout, order tracking, and the Editorial-tier and Minimum-tier lookbooks ALL work without it. The skill degrades gracefully (Premium \u2192 Editorial \u2192 Minimum) per references/headless-mode.md \u00a7 \"Recurring weekly newsletter\" and SKILL.md workflow #3.",
+      "conditional": "Default for any unqualified lookbook request: Premium-tier gpt-image-2 virtual try-on imagery, with Editorial/Minimum used only when Premium prerequisites are missing, fail, or the customer explicitly asks for no AI. Stock checks, wardrobe gap analysis, recommend, cart, MPP checkout, and order tracking are all unaffected by absence.",
       "purpose": "OpenAI /v1/images/edits with model gpt-image-2 for AI try-on imagery. Optional capability, not a hard prereq.",
       "format": "OpenAI API secret key (sk-...)",
       "obtain_url": "https://platform.openai.com/api-keys",
@@ -78,13 +78,13 @@
       },
       {
         "host": "api.openai.com",
-        "purpose": "Image generation (gpt-image-2). Opt-in: only when OPENAI_API_KEY is set and the customer asks for an AI try-on lookbook (workflow #3).",
+        "purpose": "Image generation (gpt-image-2). Default path for unqualified lookbook requests when OPENAI_API_KEY is set and the profile has enough reference photos.",
         "opt_in": true,
-        "trigger": "Workflow #3 try-on; OPENAI_API_KEY present"
+        "trigger": "Workflow #3 default try-on; OPENAI_API_KEY present"
       },
       {
         "host": "api.cloudflare.com",
-        "purpose": "Cloudflare Pages deploy of HTML lookbook via wrangler. Operator-installed CLI; the skill's scripts/deploy-lookbook.sh shells out to it.",
+        "purpose": "Cloudflare Pages deploy of HTML lookbook plus default KV-backed voting via wrangler. Operator-installed CLI; the skill's scripts/deploy-lookbook.sh shells out to it.",
         "opt_in": true,
         "trigger": "scripts/deploy-lookbook.sh invocation",
         "via": "wrangler (operator-installed, https://github.com/cloudflare/workers-sdk)"

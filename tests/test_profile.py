@@ -147,10 +147,12 @@ def test_parse_profile_handles_inline_comments():
     text = """\
 - gender: m  # male
 - home_zip: 90291  # Venice
+- lookbook_votes_kv_id: 0e0b9122c04141f8b79b43d1081b3697  # Cloudflare KV
 """
     out = parse_profile(text)
     assert out["gender"] == "m"
     assert out["home_zip"] == "90291"
+    assert out["lookbook_votes_kv_id"] == "0e0b9122c04141f8b79b43d1081b3697"
 
 
 def test_parse_profile_path_form_takes_precedence_over_heading():

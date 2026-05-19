@@ -1,0 +1,21 @@
+# Copy into the deploy directory (alongside index.html and functions/).
+# Replace <PROJECT_NAME>, <LOOKBOOK_ID>, and <KV_NAMESPACE_ID> with real values.
+#
+# To create the KV namespace:
+#   CLOUDFLARE_ACCOUNT_ID=<your-account-id> wrangler kv namespace create LOOKBOOK_VOTES
+# Note: the env var is required for KV operations even though `wrangler whoami`
+# is authenticated — observed bug as of wrangler 4.86.0.
+#
+# Then deploy from the deploy directory:
+#   cd <deploy-dir> && wrangler pages deploy . --project-name <PROJECT_NAME> --branch main
+
+name = "<PROJECT_NAME>"
+pages_build_output_dir = "."
+compatibility_date = "2026-05-01"
+
+[vars]
+LOOKBOOK_ID = "<LOOKBOOK_ID>"
+
+[[kv_namespaces]]
+binding = "LOOKBOOK_VOTES"
+id      = "<KV_NAMESPACE_ID>"

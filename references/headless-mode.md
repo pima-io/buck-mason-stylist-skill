@@ -29,22 +29,23 @@ A scheduled run that opens a clarification question is a bug — it just sits th
 |---|---|
 | Lookbook format | `html-cart` if MPP-reachable, else `html` (read-only); **never** `ppt` (no review surface) |
 | Number of looks | 2–3 (skip the optional 4th–5th) |
-| Output tier | Premium if `OPENAI_API_KEY` + ≥2 reference photos; otherwise Editorial; otherwise Minimum |
+| Output tier | One-shot/event lookbooks: Premium if `OPENAI_API_KEY` + ≥2 reference photos; otherwise Editorial, then Minimum. Recurring weekly newsletters: Editorial unless `weekly_lookbook_tier: premium` |
 | Hosting transport | `profile.md → preferred_lookbook_host`, else the highest-ranked transport from the `references/hosting-options.md` probe |
 | Hosting confirmation | **Skip** when `preferred_lookbook_host_auto: true`; otherwise abort the run with `BLOCKER: hosting needs interactive confirm` |
+| Voting | On for Cloudflare Pages deploys. Resolve `lookbook_votes_kv_id` from `profile.md` or `$LOOKBOOK_VOTES_KV_ID`; missing id is a blocker unless the run was explicitly requested as read-only / `--no-voting` |
 | Coupon / credit | Apply available customer credit (default in workflow #4); no coupon hunting |
 | Pickup vs ship | Ship to `profile.md → shipping_address` |
 | Out-of-stock pieces | Drop from the lookbook (note the drop in the run summary), don't substitute |
 
-### 3. Product-image fallback if AI try-on is unavailable
+### 3. Premium try-on first for one-shot / event lookbooks
 
-The Editorial tier (product imagery + flat-lays, no gpt-image-2 call) is the default headless fallback when:
+The normal one-shot or event-triggered lookbook default is Premium: gpt-image-2 try-on imagery placed on the customer. The Editorial tier (product imagery + flat-lays, no gpt-image-2 call) is the documented fallback when:
 
 - `OPENAI_API_KEY` is unset, or
 - Fewer than 2 `reference_photos` resolve, or
 - gpt-image-2 returns a non-success status (rate limit, billing block, content-policy refusal — surface the reason in the run summary).
 
-The minimum-viable-lookbook tier (text + links + stock + rationale) is the deeper fallback when even product imagery isn't reachable (e.g., MCP unreachable). Always produce *something*.
+The minimum-viable-lookbook tier (text + links + stock + rationale) is the deeper fallback when even product imagery isn't reachable (e.g., MCP unreachable). Always produce *something*, but report the fallback reason in the run summary.
 
 ### 4. Deploy only if explicitly pre-authorized
 
@@ -110,13 +111,14 @@ python3 scripts/build-html-lookbook.py \
   --look-images "$RUN_DIR/looks/" \
   --out "$RUN_DIR/deploy/"
 
-bash    scripts/deploy-lookbook.sh "$RUN_DIR/deploy/" "$PROJECT_NAME" --auto --no-overwrite
+bash    scripts/deploy-lookbook.sh "$RUN_DIR/deploy/" "$PROJECT_NAME" \
+  --auto --no-overwrite --kv-id "$LOOKBOOK_VOTES_KV_ID"
 
 python3 scripts/validate-lookbook.py --dir "$RUN_DIR/deploy/" \
   --url "https://${PROJECT_NAME}.pages.dev/"
 ```
 
-The single canonical command that composes all of the above is **`scripts/run-headless-lookbook.py`** (orchestrator: discover → curate → build → deploy → validate → summary). For one-shot headless runs prefer that — see § "The end-to-end orchestrator" below.
+The single canonical command that composes all of the above is **`scripts/run-headless-lookbook.py`** (orchestrator: discover → curate → build → deploy → validate → summary). For one-shot headless runs prefer that — see § "The end-to-end orchestrator" below. The orchestrator passes `profile.md → lookbook_votes_kv_id` through to the deploy wrapper; without that value or `$LOOKBOOK_VOTES_KV_ID`, the deploy blocks because voting is the default.
 
 If any step's exit code is non-zero, the run summary file is the failure form. If all three succeed, the summary file is the success form and (if a `notify_url` is wired) the agent posts the summary to that channel.
 
@@ -175,7 +177,8 @@ python3 scripts/build-html-lookbook.py --no-tryon \
   --out    "$RUN_DIR/deploy/"
 
 PROJECT="${LOOKBOOK_PROJECT_PREFIX}-weekly-2026-19"
-bash scripts/deploy-lookbook.sh "$RUN_DIR/deploy/" "$PROJECT" --auto --no-overwrite
+bash scripts/deploy-lookbook.sh "$RUN_DIR/deploy/" "$PROJECT" \
+  --auto --no-overwrite --kv-id "$LOOKBOOK_VOTES_KV_ID"
 
 # Append every proposed piece to the wishlist with proposed_at + lookbook_url.
 # (Either inline or via a future scripts/log-proposal.py — keep agent-side.)
@@ -183,7 +186,7 @@ bash scripts/deploy-lookbook.sh "$RUN_DIR/deploy/" "$PROJECT" --auto --no-overwr
 
 ## The end-to-end orchestrator
 
-Use `scripts/run-headless-lookbook.py` for a single canonical headless invocation. It composes the deterministic chain (score → discover → curate → build → deploy → validate → summary), skips on hard-veto events, falls back to Editorial when Premium isn't reachable, and writes a run-summary file at `~/.buck-mason-stylist/runs/<lookbook_id>/summary.md`.
+Use `scripts/run-headless-lookbook.py` for a single canonical headless invocation. It composes the deterministic chain (score → discover → curate → build → deploy → validate → summary), selects Premium for one-shot/event lookbooks when `OPENAI_API_KEY` and at least two reference photos are available, keeps recurring weekly runs Editorial unless opted into Premium, and writes a run-summary file at `~/.buck-mason-stylist/runs/<lookbook_id>/summary.md`.
 
 ```bash
 # Weekly newsletter
@@ -193,7 +196,7 @@ python3 scripts/run-headless-lookbook.py --weekly --profile ~/agent-workspace/pr
 python3 scripts/run-headless-lookbook.py --event /path/to/event.json --profile ~/agent-workspace/profile.md
 ```
 
-The orchestrator never deploys without `preferred_lookbook_host_auto: true` in the profile; on missing prereqs it produces the lookbook locally (under `~/.buck-mason-stylist/runs/<lookbook_id>/deploy/`) and writes a summary saying "ready to deploy — set `_auto: true` or run interactively to publish." That preserves the deploy-authorization rule even when an event scores 7–10 and would otherwise auto-generate AND auto-deploy.
+The orchestrator never deploys without `preferred_lookbook_host_auto: true` in the profile; when deploy authorization is missing it produces the lookbook locally (under `~/.buck-mason-stylist/runs/<lookbook_id>/deploy/`) and writes a summary saying "ready to deploy — set `_auto: true` or run interactively to publish." That preserves the deploy-authorization rule even when an event scores 7–10 and would otherwise auto-generate AND auto-deploy.
 
 The run summary (per § "The run summary format" above) reports the URL, the count of new products surfaced, and any reason items got dropped (out of stock, ethos mismatch, already proposed within 8 weeks).
 

@@ -1,7 +1,7 @@
 ---
 name: buck-mason-stylist
 description: Personal shopping skill for Buck Mason. Stock-checks (online + nearby store), wardrobe gap analysis, season- and event-aware outfit suggestions, AI try-on lookbooks, and one-shot cart + checkout. Customer brings sizes once; the agent reuses them across requests.
-version: 0.6.5
+version: 0.7.1
 license: MIT
 authors:
   - Buck Mason / Pima
@@ -20,11 +20,11 @@ metadata:
     env_details:
       OPENAI_API_KEY:
         required: false
-        conditional: "Premium-tier lookbook generation only (workflow #3's gpt-image-2 try-on imagery). The skill degrades gracefully — Editorial tier (product-imagery layout) and Minimum tier (text + links + stock) work with NO key set. Stock checks, recommend, cart, MPP checkout, and order tracking are all unaffected by absence."
+        conditional: "Default for any unqualified lookbook request: Premium-tier gpt-image-2 virtual try-on imagery, with Editorial/Minimum used only when Premium prerequisites are missing, fail, or the customer explicitly asks for no AI. Stock checks, recommend, cart, MPP checkout, and order tracking are all unaffected by absence."
         purpose: "OpenAI /v1/images/edits with model gpt-image-2 for AI try-on imagery."
         format: "OpenAI API secret key, prefix sk-..."
         obtain_url: "https://platform.openai.com/api-keys"
-        notes: "The OpenAI organization must be verified for gpt-image-2 access. Unverified orgs get 403 from /v1/images/edits; the skill surfaces that as an actionable error and falls through to Editorial tier rather than silently downgrading. See https://help.openai.com/en/articles/10910291."
+        notes: "The OpenAI organization must be verified for gpt-image-2 access. Unverified orgs get 403 from /v1/images/edits; the skill surfaces that as an actionable error and offers Editorial tier rather than silently downgrading. See https://help.openai.com/en/articles/10910291."
         how_to_set: "export OPENAI_API_KEY=sk-..."
     optional_cli_details:
       "@stripe/link-cli":
@@ -52,11 +52,13 @@ You are acting as a personal shopper for Buck Mason. The customer has loaded thi
 |---|---|---|---|
 | `OPENAI_API_KEY` | **Optional** — gates Premium-tier lookbook generation only | Workflow #3 Premium tier (gpt-image-2 try-on imagery via `https://api.openai.com/v1/images/edits`) | `export OPENAI_API_KEY=sk-...` in the shell or secret manager that runs the agent. Get a key at <https://platform.openai.com/api-keys>. |
 
-Stock checks, wardrobe gap analysis, recommend, cart, MPP checkout, order tracking, and the **Editorial** + **Minimum** lookbook tiers all work with **no env config**. The Premium tier (gpt-image-2 try-on imagery) is the only thing that needs `OPENAI_API_KEY`, and even then the skill falls through to Editorial tier if the key is missing rather than blocking.
+Stock checks, wardrobe gap analysis, recommend, cart, MPP checkout, order tracking, and the **Editorial** + **Minimum** lookbook tiers all work with **no env config**. The Premium tier (gpt-image-2 try-on imagery) is the only thing that needs `OPENAI_API_KEY`.
 
-**`gpt-image-2` access is gated** when you do set the key. The OpenAI organization tied to the key must be **verified for `gpt-image-2`** (see <https://help.openai.com/en/articles/10910291>). Unverified orgs get HTTP 403 from `/v1/images/edits` — the skill surfaces that as an actionable error and falls through to Editorial tier rather than silently downgrading to a lesser image model.
+**Default lookbook behavior:** when the customer says "lookbook" without qualifying the format, attempt the Premium virtual try-on path first: gpt-image-2 places the selected clothes on the customer, then the agent assembles and deploys the hosted lookbook with the voting mechanism enabled. Do not choose Editorial tier just because it is faster or cheaper. Use Editorial/Minimum only when Premium prerequisites are unavailable, generation fails, or the customer explicitly asks for a no-AI/read-only artifact.
 
-If `OPENAI_API_KEY` is unset and the customer asks for a try-on image, tell them how to set it (the table above) and produce the Editorial-tier lookbook in the meantime — don't block the rest of the flow.
+**`gpt-image-2` access is gated** when you do set the key. The OpenAI organization tied to the key must be **verified for `gpt-image-2`** (see <https://help.openai.com/en/articles/10910291>). Unverified orgs get HTTP 403 from `/v1/images/edits` — surface that as an actionable error and offer Editorial tier rather than silently downgrading to a lesser image model.
+
+If `OPENAI_API_KEY` is unset or `profile.md` has fewer than two usable reference photos and the customer asks for a lookbook, say that the default virtual try-on needs the missing prerequisite, then offer to continue with Editorial tier. Do not silently produce an Editorial-tier lookbook while calling it the default.
 
 ## When to use this skill
 
@@ -159,11 +161,11 @@ If you only have the SKU (not the product), skip steps 1–2 and go straight to 
 6. For each surviving pick, **write a one-sentence rationale** that touches at least: climate fit, formality fit, and personal/classic angle. "It's new and in stock" is not a rationale — if you can't write a real reason, drop the item.
 7. Save the resolved list (with rationale per item) to a session file (`outfit-<date>.md`) so the customer can iterate.
 
-### 3. Lookbook generation — "show me in these clothes, in [setting]"
+### 3. Lookbook generation — "lookbook" / "show me in these clothes, in [setting]"
 
-A lookbook is a small set of recommended outfits in a sharable artifact. Try-on imagery (gpt-image-2 placing the customer in the clothes) is the *premium* mode — the skill degrades gracefully through three tiers depending on what's set up, and **always produces something usable**:
+A lookbook is a small set of recommended outfits in a sharable artifact. **Unqualified "lookbook" means Premium virtual try-on by default**: use `gpt-image-2` to place the clothes on the customer, assemble a hosted HTML/HTML-cart lookbook, and deploy it with partner/stakeholder voting enabled. Editorial and Minimum tiers are fallback modes, not the default for normal interactive lookbook requests.
 
-**Fallback ladder — pick the highest tier the runtime supports.**
+**Default tier ladder — attempt Premium first, then fall back only when needed.**
 
 | Tier | Requires | Output |
 |---|---|---|
@@ -171,7 +173,7 @@ A lookbook is a small set of recommended outfits in a sharable artifact. Try-on 
 | **Editorial** | none | Buck Mason on-model + flat-lay product imagery laid out per look (no AI) |
 | **Minimum** | none | Per-look bullet list with names, prices, clickable URLs, stock lines, one-sentence rationale per pick |
 
-The minimum-viable lookbook still includes the things that make the format useful — names, prices, URLs, in-your-size stock, rationale. Don't block the flow on a missing OpenAI key or a missing photo; produce the editorial or minimum tier and tell the customer how to upgrade.
+If Premium prerequisites are missing (`OPENAI_API_KEY`, verified org access, or >=2 usable `profile.md` reference photos), say exactly what is missing and ask whether to continue in Editorial tier. If a Premium generation attempt fails on one look, keep successful Premium looks and use Editorial only for the failed look unless the customer asks to regenerate. The minimum-viable lookbook still includes the things that make the format useful — names, prices, URLs, in-your-size stock, rationale.
 
 **Per-format pick (run regardless of tier):**
 
@@ -179,8 +181,8 @@ The minimum-viable lookbook still includes the things that make the format usefu
 |---|---|---|
 | `images` | "just the photos" / fastest iteration | Raw `lookbook/<date>-<event>-look-N.png` only |
 | `ppt` | review with stylist / SO | 16:9 `.pptx`, default when MPP isn't reachable |
-| `html` | shareable preview, email body, read-only | Self-contained HTML, no buy affordance |
-| `html-cart` *(default when MPP is reachable)* | customer is going to buy | Interactive HTML with checkbox cart + plain-prose stylist handoff |
+| `html` | shareable preview, email body, read-only | Hosted HTML, no buy affordance; still deploy with voting unless the customer asks for read-only |
+| `html-cart` *(default when MPP is reachable)* | customer is going to buy | Hosted interactive HTML with checkbox cart + plain-prose stylist handoff; deploy with voting |
 
 **MPP-reachable** means `@stripe/link-cli` is installed agent-side AND `profile.md → link_payment_method: confirmed` (customer has a Stripe Link wallet with a payment method). When `unconfirmed`, ask once and persist the answer; without it, fall back to `ppt` or `html`. `OPENAI_API_KEY` is a separate gate (try-on images), orthogonal to MPP.
 
@@ -189,6 +191,7 @@ The minimum-viable lookbook still includes the things that make the format usefu
 - Output assembly (`images` / `ppt` / `html` / `html-cart` builders, per-format must-haves, brand styling, OG meta tags, responsive breakpoints, lightbox, prose handoff): **`references/output-formats.md`** + **`references/brand-style.md`**.
 - Hosting: **`references/hosting-options.md`** (capability-aware probe + ranked transports).
 - Acceptance gates before sharing the URL: **`references/acceptance-checklist.md`** — every format must clear it.
+- **Partner / stakeholder voting — part of the default lookbook**: every Cloudflare Pages lookbook deploy gets a thumbs up/down vote form per look + per item (free-text comments), stored in a shared Cloudflare KV namespace via a pair of Pages Functions. `scripts/deploy-lookbook.sh` bakes it in automatically when given a KV id (via `--kv-id`, `$LOOKBOOK_VOTES_KV_ID`, or `profile.md → lookbook_votes_kv_id`). If no KV id is available, stop and surface the one-time setup command rather than quietly deploying `--no-voting`. Pass `--no-voting` only when the customer explicitly asks for a read-only static lookbook with no `/api/*` endpoints. The form is unobtrusive when no one votes — but ask the customer once before sharing the URL with a partner, since the partner will see the form. Full architecture, KV setup, schema, and security model in **`references/voting.md`**.
 - Headless / scheduled / cron-mode runs (no questions, defaults assumed, silent unless blocker): **`references/headless-mode.md`**.
 - **Per-lookbook isolation (non-negotiable): `references/run-layout.md`.** Each lookbook gets its own `~/.buck-mason-stylist/runs/<lookbook_id>/` directory; never reuse images, picks, or configs from another run. The build script enforces a `.lookbook_id` marker check and aborts if `--look-images` came from a different lookbook.
 
@@ -264,7 +267,7 @@ When choosing or recommending items, weight by (in this order):
 - If Shopify Storefront is unreachable, fall back to Pima endpoints alone — the customer still gets catalog, locations, cart, and checkout, just without rich images and per-store availability. Tell them what's missing and why.
 - If `/api/inventory` returns 403, don't have an inventory token — don't repeatedly retry. Switch to Shopify availability.
 - If a SKU resolves to zero stock everywhere, offer `POST /api/restock_notifications` (`product_code`, `size_name`) and continue with alternatives.
-- If image generation fails or is unavailable in the agent runtime, produce a **text-only lookbook** with product imagery laid out — never block the shopping flow on image generation.
+- If image generation fails or is unavailable in the agent runtime, surface the Premium blocker and offer to continue with Editorial tier. Do not silently convert a requested lookbook into a no-AI artifact.
 
 ## Output style
 
@@ -290,6 +293,7 @@ When choosing or recommending items, weight by (in this order):
 - `references/headless-mode.md` — five rules for scheduled / cron / voice runs: no questions, defaults, fallback tier, deploy-only-if-pre-authorized, silent-unless-blocker. Run summary format.
 - `references/event-suitability.md` — calendar-driven scoring rubric (0–10) for "should this event trigger a lookbook?" with hard-veto for medical/therapy. Operationalized as `scripts/score-calendar-event.py`.
 - `references/run-layout.md` — per-lookbook directory isolation rules + the `.lookbook_id` marker convention. **Hard rule**: never share images/picks/configs across lookbooks. `scripts/build-html-lookbook.py` enforces the marker check.
+- `references/voting.md` — partner / stakeholder feedback capability (thumbs up/down per look + per item, free-text comments, Cloudflare KV + Pages Functions). **On by default in `scripts/deploy-lookbook.sh`**; `--no-voting` opt-out. Describes the KV setup, schema, security model, smoke-test handshake.
 - `templates/profile.example.md`, `wardrobe.example.md`, `events.example.md` — copy these into the customer's workspace and fill in.
 - `templates/profile.schema.json` — JSON Schema for `profile.md`. Validate machine-readably; enum'd allowed values for `gender`, sizes, `link_payment_method`, `preferred_lookbook_host`, etc.
 - `examples/stock-check.md`, `examples/lookbook.md` — concrete walkthroughs of the two main flows.
@@ -300,3 +304,5 @@ When choosing or recommending items, weight by (in this order):
 - `scripts/discover-weekly-candidates.py` — surfaces recently-live + previously-unproposed products for the recurring weekly newsletter (`references/headless-mode.md` § "Recurring weekly newsletter"). Dedupes against `~/.buck-mason-stylist/wishlist.jsonl`.
 - **`scripts/run-headless-lookbook.py`** — single canonical headless invocation. Composes score (event mode) → discover → curate → build → deploy → validate → wishlist append → run summary. Use `--weekly` or `--event <path>`. Respects the `preferred_lookbook_host_auto` deploy gate. Premium-tier resume builds run the face-verification gate automatically.
 - `scripts/verify-face.py` — face-verification gate for Premium-tier outputs. GPT-4o-vision call + strict rubric (hair / beard / eye color / skin tone / age / asymmetry / off_putting AI-generic look). Exit 0 pass, 1 fail, 2 inconclusive. Spec in `references/image-generation.md` § "Face verification gate."
+- `scripts/inject-voting-ui.py` — post-build injector that adds the thumbs up/down voting widget (per look + per item) + favicon link tags to a built `index.html`. Idempotent. Normally invoked automatically by `scripts/deploy-lookbook.sh` (default-on); run directly for offline iteration on the UI.
+- `templates/voting/functions-api-vote.js`, `functions-api-votes.js`, `wrangler.toml.example` — Cloudflare Pages Functions + binding template for voting. `scripts/deploy-lookbook.sh` copies these into the deploy dir, sed-substitutes project name + lookbook id + KV id, and ships them. Spec: `references/voting.md`.

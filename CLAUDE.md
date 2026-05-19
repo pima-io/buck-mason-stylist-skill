@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. The Codex-facing companion is `AGENTS.md`; keep durable repo rules aligned between the two, while leaving Claude-specific tool and sandbox notes here.
 
 ## What this repo is
 
@@ -27,13 +27,17 @@ If you skip the bump, ClawHub installs will silently serve the prior version. Re
 
 ## Architecture — the big picture
 
+### Codex / OpenAI surfaces
+
+Codex reads `AGENTS.md` for repo-editing guidance. The root `SKILL.md` remains the runtime skill entry point for every agent, and `agents/openai.yaml` supplies OpenAI/Codex UI metadata plus the default `$buck-mason-stylist` invocation prompt. When the skill name, description, user-facing prompt, or branding changes, update `agents/openai.yaml` in the same change.
+
 ### `SKILL.md` is the entry point
 
 Everything a loaded agent reads first lives in `SKILL.md` at the root. Its YAML frontmatter declares the runtime contract (env vars, required binaries, optional CLIs) that ClawHub surfaces to operators at install time. The body declares **five workflows** the skill activates on:
 
 1. **Stock check** — does Buck Mason have item X in my size, online + nearby store
 2. **Wardrobe gap analysis** — capsule recommendations diffed against `wardrobe.md`
-3. **AI try-on lookbook** — gpt-image-2 editorial photos in `images` / `ppt` / `html` formats
+3. **AI try-on lookbook** — default gpt-image-2 virtual try-on in hosted `html` / `html-cart`, with Cloudflare voting enabled on deploy
 4. **Cart + checkout** — two checkout paths, see below
 5. **Order tracking + returns** — runs against the same `/api/*` that powers orders.buckmason.com
 
@@ -66,6 +70,7 @@ The default install has all high-risk capabilities turned **off** by constructio
 | Capability | Gate | Reference |
 |---|---|---|
 | AI try-on lookbook (sends photos to OpenAI) | `OPENAI_API_KEY` + verified org for `gpt-image-2` | `references/image-generation.md` |
+| Lookbook voting deploy (public Pages URL + KV-backed comments) | `wrangler` auth + Cloudflare KV namespace id (`lookbook_votes_kv_id` or `LOOKBOOK_VOTES_KV_ID`) + publish confirmation / headless auto-publish opt-in | `references/voting.md` |
 | MPP fully-agent-driven checkout | `npm i -g @stripe/link-cli` (operator) + customer has a Stripe Link account with a linked payment method (`profile.md → link_payment_method: confirmed`) + per-purchase user opt-in | `references/mpp.md` |
 | Email magic-link account linking | Authorized email MCP + retrieval-method confirmation | `SKILL.md` workflow #5c |
 

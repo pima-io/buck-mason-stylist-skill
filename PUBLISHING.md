@@ -39,8 +39,12 @@ purpose.
 ### What's required to install
 - The pima.io MCP is path-tenanted (`/mcp/buckmason/...`); the skill calls it
   directly with no extra setup.
-- The user's own `OPENAI_API_KEY` for image generation (org-verified for
-  `gpt-image-2`). This is the only required environment variable.
+- The user's own `OPENAI_API_KEY` for default Premium virtual try-on lookbooks
+  (org-verified for `gpt-image-2`). Other workflows and fallback lookbook tiers
+  work without it.
+- A Cloudflare KV namespace id (`lookbook_votes_kv_id` or
+  `LOOKBOOK_VOTES_KV_ID`) when deploying the default voting-enabled Pages
+  lookbook.
 - macOS or Linux with `magick` (ImageMagick 7), `jq`, `curl`, `python3` +
   `python-pptx`, and `Pillow`. `stripe/link-cli` is required only for the
   fully-agent-driven MPP checkout path.
@@ -59,7 +63,8 @@ ClawHub reviewers can approve permissions without back-and-forth.
      "version": "0.1.0",
      "visibility": "public",
      "homepage": "https://github.com/buckmason/buck-mason-stylist-skill",
-     "primaryEnv": ["OPENAI_API_KEY"],
+     "primaryEnv": [],
+     "optional_env": ["OPENAI_API_KEY"],
      "requires": {
        "binaries": ["magick", "jq", "curl", "python3"],
        "python": ["python-pptx", "Pillow"]
@@ -74,7 +79,8 @@ ClawHub reviewers can approve permissions without back-and-forth.
    ---
    name: buck-mason-stylist
    description: Buck Mason shopping stylist — checks online + nearby-store stock,
-     suggests outfits, generates editorial try-on lookbooks (PNG + PPT/HTML),
+     suggests outfits, generates gpt-image-2 virtual try-on lookbooks with
+     voting-enabled hosted HTML,
      and builds Shopify cart links or runs fully-agent-driven MPP checkouts.
      Talks to the pima.io MCP at /mcp/buckmason/*.
    compatibility:

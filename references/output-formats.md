@@ -9,6 +9,8 @@ Four supported outputs from the lookbook workflow (`SKILL.md` workflow 3, step 4
 | `html` (`.html`) | ~1s | Public preview link, email body, browser sharing |
 | `html-cart` (`.html`, interactive) | ~1s | Customer picks items from the lookbook → structured handoff back to the stylist agent → MPP checkout (no Shopify redirect) |
 
+For an unqualified customer request that says "lookbook," default to the hosted path: Premium gpt-image-2 virtual try-on imagery inside `html` or `html-cart`, then Cloudflare Pages deploy with the voting mechanism enabled. `images` and `ppt` are explicit-format outputs; `html` becomes read-only only when the customer asks for no cart affordance, and voting is suppressed only with an explicit read-only / `--no-voting` request.
+
 Every format MUST include, per piece:
 1. Product name
 2. Price (USD with `$`)
@@ -270,9 +272,9 @@ done
 
 Same builder as `html`, plus a checkbox per piece, a sticky selection summary, and a **"Send to my stylist"** button that emits a structured JSON block the customer pastes back to the agent. The agent then drives **MPP checkout** (workflow #4 path B in `SKILL.md`), gathering ship-vs-pickup, coupon, and credit conversationally and calling `POST /mcp/buckmason/checkout`. Buck Mason / Shopify never enter the customer's UI.
 
-**Why this format exists.** The default `html` is a viewer; `html-cart` is an intent-capture surface. Use it whenever the lookbook is going to drive a purchase **and MPP is reachable** — `@stripe/link-cli` is installed in the agent's runtime AND the customer has a Stripe Link account with a payment method linked (persisted as `profile.md → link_payment_method: confirmed`). Without those, the cart bar would emit a handoff the agent can't actually settle, which is worse than no cart bar at all — fall back to `html` (read-only) or `ppt`. `OPENAI_API_KEY` is orthogonal — it gates the try-on images inside any of these formats, not MPP.
+**Why this format exists.** Plain `html` is a viewer; `html-cart` is an intent-capture surface. Use it whenever the lookbook is going to drive a purchase **and MPP is reachable** — `@stripe/link-cli` is installed in the agent's runtime AND the customer has a Stripe Link account with a payment method linked (persisted as `profile.md → link_payment_method: confirmed`). Without those, the cart bar would emit a handoff the agent can't actually settle, which is worse than no cart bar at all — fall back to hosted `html` (read-only commerce, voting still enabled) or `ppt` only when the customer explicitly asked for slides. `OPENAI_API_KEY` is orthogonal — it gates the try-on images inside any of these formats, not MPP.
 
-Use plain `html` when the customer explicitly wants a non-interactive shareable artifact (email body, public preview), or when MPP isn't reachable on this surface.
+Use plain `html` when the customer explicitly wants a non-commerce shareable artifact (email body, public preview), or when MPP isn't reachable on this surface.
 
 ### What's added on top of `html`
 
@@ -570,6 +572,8 @@ These were verified against `app/services/mcp/checkout.rb` and `app/controllers/
 ## Hosting the HTML lookbook online
 
 **Read `references/hosting-options.md`.** It carries the full capability-aware menu: probe scripts, ranked transports (Cloudflare Pages → Netlify → Vercel → Surge → Gist → S3 → 0x0.st), per-transport deploy commands, sticky preference persistence in `profile.md`, and the design rules around confirm-before-publish and "tool installed but unauthenticated is a soft-no." The agent runs the probe, picks the top transport that's actually usable, asks once, and deploys. Don't reproduce that decision tree here.
+
+For Cloudflare Pages, **voting is part of the default deploy**, not part of the deterministic HTML builder. `scripts/deploy-lookbook.sh` injects the vote UI, copies Pages Functions, renders `wrangler.toml`, and smoke-tests `/api/votes` when given `--kv-id` or `$LOOKBOOK_VOTES_KV_ID`. Missing KV id is a setup blocker; use `--no-voting` only for an explicitly read-only static lookbook. Full details live in `references/voting.md`.
 
 After hosting, hand the URL back to the customer + offer a one-line "Open it" + a "Build cart for Look 01 — $1,164" button (workflow 4).
 

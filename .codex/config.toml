@@ -1,0 +1,3 @@
+# Codex reads AGENTS.md by default. Keep the legacy Claude guide available as a
+# fallback for copied checkouts that have not yet received AGENTS.md.
+project_doc_fallback_filenames = ["CLAUDE.md"]
